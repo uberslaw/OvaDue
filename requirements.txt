@@ -1,0 +1,7 @@
+pandas
+xlrd
+streamlit
+plotly
+streamlit-js-eval
+streamlit-autorefresh
+openpyxl

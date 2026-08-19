@@ -1,0 +1,18 @@
+{
+  "productId": "ovadue",
+  "productName": "OvaDue",
+  "healthUrl": "http://127.0.0.1:8501/_stcore/health",
+  "logDirs": ["../data"],
+  "logPaths": ["../data/streamlit.log", "../data/streamlit-error.log"],
+  "diagnosticsFlagPath": "../data/diagnostics.requested",
+  "showVenvUi": true,
+  "showBrowser": true,
+  "processFallback": {
+    "fileName": "../.venv/Scripts/python.exe",
+    "arguments": "-m streamlit run app.py --server.headless true --server.address 127.0.0.1 --server.port 8501",
+    "workingDirectory": "..",
+    "pidFile": "../data/streamlit.pid",
+    "logPath": "../data/streamlit.log",
+    "port": 8501
+  }
+}
