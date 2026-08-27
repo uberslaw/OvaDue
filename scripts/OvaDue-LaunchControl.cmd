@@ -13,4 +13,6 @@ set "PWSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PWSH%" set "PWSH=powershell.exe"
 
 "%PWSH%" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "%PS1%" %*
-exit /b %ERRORLEVEL%
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" pause
+exit /b %RC%

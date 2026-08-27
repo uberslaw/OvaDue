@@ -16,12 +16,39 @@ $script:UploadsDir = Join-Path $script:Root 'uploads'
 $script:PidFile = Join-Path $script:DataDir 'streamlit.pid'
 $script:LogFile = Join-Path $script:DataDir 'streamlit.log'
 $script:ErrorLogFile = Join-Path $script:DataDir 'streamlit-error.log'
+$script:StartupLogFile = Join-Path $script:DataDir 'launchcontrol-startup.log'
 $script:LastStatus = ''
 $script:LogOffset = [int64]0
 $script:FollowLogs = $false
 $script:ConsoleChars = 0
 
+function Write-StartupLog {
+    param([string]$Message)
+    try {
+        if (-not (Test-Path -LiteralPath $script:DataDir)) {
+            New-Item -ItemType Directory -Path $script:DataDir -Force | Out-Null
+        }
+        Add-Content -LiteralPath $script:StartupLogFile -Value "[$(Get-Date -Format o)] $Message" -Encoding UTF8
+    } catch { }
+}
+
+function Show-LaunchControlStartupError {
+    param([string]$Message)
+
+    Write-StartupLog "FATAL: $Message"
+    $logPath = Join-Path $script:DataDir 'launchcontrol-crash.log'
+    Add-Content -LiteralPath $logPath -Value "[$(Get-Date -Format o)] [Startup] $Message" -Encoding UTF8
+    [System.Windows.Forms.MessageBox]::Show(
+        "OvaDue Launch Control failed to start.`r`n`r`n$Message`r`n`r`nSee: $logPath",
+        'OvaDue Launch Control',
+        'OK',
+        'Error'
+    ) | Out-Null
+}
+
+try {
 New-Item -ItemType Directory -Path $script:DataDir, $script:UploadsDir -Force | Out-Null
+Write-StartupLog 'Launch Control starting'
 
 function Get-DashboardPid {
     if (-not (Test-Path -LiteralPath $script:PidFile)) { return 0 }
@@ -49,6 +76,7 @@ function Get-StreamlitListenerPid {
 
 function Add-EventLine {
     param([string]$Message, [string]$Level = 'INFO')
+    if (-not $script:Events) { return }
     $line = "[$(Get-Date -Format 'HH:mm:ss')] [$Level] $Message`r`n"
     $script:Events.AppendText($line)
     $script:ConsoleChars += $line.Length
@@ -56,10 +84,8 @@ function Add-EventLine {
         $script:Events.Text = $script:Events.Text.Substring($script:Events.TextLength - 60000)
         $script:ConsoleChars = $script:Events.TextLength
     }
-    if ($script:FollowLogs) {
-        $script:Events.SelectionStart = $script:Events.TextLength
-        [void]$script:Events.ScrollToCaret()
-    }
+    $script:Events.SelectionStart = $script:Events.TextLength
+    $script:Events.ScrollToCaret()
 }
 
 function Test-DashboardHealth {
@@ -109,8 +135,8 @@ function Start-Dashboard {
         [System.Windows.Forms.MessageBox]::Show('Missing .venv Python or app.py.', 'OvaDue Launch Control') | Out-Null
         return
     }
-    $args = '-m streamlit run "{0}" --server.headless true --server.address 0.0.0.0 --server.port 8501' -f $script:App
-    $process = Start-Process -FilePath $script:Python -ArgumentList $args -WorkingDirectory $script:Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:LogFile -RedirectStandardError $script:ErrorLogFile
+    $streamlitArgs = '-m streamlit run "{0}" --server.headless true --server.address 0.0.0.0 --server.port 8501' -f $script:App
+    $process = Start-Process -FilePath $script:Python -ArgumentList $streamlitArgs -WorkingDirectory $script:Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:LogFile -RedirectStandardError $script:ErrorLogFile
     Set-Content -LiteralPath $script:PidFile -Value $process.Id -NoNewline
     Add-EventLine "Started dashboard as PID $($process.Id)."
 }
@@ -140,10 +166,22 @@ function Update-LogTail {
     } catch { }
 }
 
-. (Join-Path $PSScriptRoot 'OvaDue-Deploy.ps1')
-Initialize-OvaDueDeploy -Root $script:Root -LogAction {
-    param([string]$Message, [string]$Level = 'INFO')
-    Add-EventLine $Message $Level
+function Initialize-DeployModule {
+    if ($script:DeployInitialized) {
+        return
+    }
+
+    $deployScript = Join-Path $PSScriptRoot 'OvaDue-Deploy.ps1'
+    if (-not (Test-Path -LiteralPath $deployScript)) {
+        throw "Missing deploy script: $deployScript"
+    }
+
+    . $deployScript
+    Initialize-OvaDueDeploy -Root $script:Root -LogAction {
+        param([string]$Message, [string]$Level = 'INFO')
+        Add-EventLine $Message $Level
+    }
+    $script:DeployInitialized = $true
 }
 
 function Invoke-DeployAction {
@@ -153,6 +191,7 @@ function Invoke-DeployAction {
     )
 
     try {
+        Initialize-DeployModule
         Add-EventLine "$Title started..."
         $result = & $Action
         $summary = ($result.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join ', '
@@ -167,45 +206,77 @@ function Invoke-DeployAction {
     }
 }
 
+$script:DeployInitialized = $false
+
 $form = New-Object System.Windows.Forms.Form
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
 $form.Text = 'OvaDue Launch Control'; $form.Size = New-Object System.Drawing.Size(1040, 720); $form.MinimumSize = New-Object System.Drawing.Size(900, 600)
 $form.StartPosition = 'CenterScreen'; $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 
 $header = New-Object System.Windows.Forms.Panel
-$header.Dock = 'Top'; $header.Height = 76; $header.BackColor = [System.Drawing.Color]::FromArgb(31, 66, 117)
-[void]$form.Controls.Add($header)
+$header.Dock = 'Top'
+$header.Height = 76
+$header.BackColor = [System.Drawing.Color]::FromArgb(31, 66, 117)
 $title = New-Object System.Windows.Forms.Label
-$title.Text = 'OvaDue Launch Control'; $title.AutoSize = $true; $title.ForeColor = [System.Drawing.Color]::White; $title.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16); $title.Location = New-Object System.Drawing.Point(18, 13)
+$title.Text = 'OvaDue Launch Control'
+$title.AutoSize = $true
+$title.ForeColor = [System.Drawing.Color]::White
+$title.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
+$title.Location = New-Object System.Drawing.Point(18, 13)
 [void]$header.Controls.Add($title)
 $subTitle = New-Object System.Windows.Forms.Label
-$subTitle.Text = 'Start, stop, diagnose, and inspect the local Streamlit dashboard process.'; $subTitle.AutoSize = $true; $subTitle.ForeColor = [System.Drawing.Color]::Gainsboro; $subTitle.Location = New-Object System.Drawing.Point(20, 46)
+$subTitle.Text = 'Start, stop, diagnose, and inspect the local Streamlit dashboard process.'
+$subTitle.AutoSize = $true
+$subTitle.ForeColor = [System.Drawing.Color]::Gainsboro
+$subTitle.Location = New-Object System.Drawing.Point(20, 46)
 [void]$header.Controls.Add($subTitle)
 
 # Single Fill container below the header; avoids multiple same-edge Dock siblings directly on the form.
 $body = New-Object System.Windows.Forms.Panel
 $body.Dock = 'Fill'
 [void]$form.Controls.Add($body)
+[void]$form.Controls.Add($header)
 
 $split = New-Object System.Windows.Forms.SplitContainer
 $split.Dock = 'Fill'
 $split.FixedPanel = 'Panel1'
 $split.IsSplitterFixed = $true
-$split.SplitterDistance = 286
-$split.Panel1MinSize = 250
-$split.Panel2MinSize = 320
 $split.BackColor = [System.Drawing.Color]::FromArgb(243, 245, 249)
 [void]$body.Controls.Add($split)
+$form.Add_Load({
+    $split.Panel1MinSize = 250
+    $split.Panel2MinSize = 320
+    $distance = [Math]::Min(286, ($split.Width - $split.Panel2MinSize - 4))
+    if ($distance -lt $split.Panel1MinSize) { $distance = $split.Panel1MinSize }
+    $split.SplitterDistance = $distance
+    $split.PerformLayout()
+    $body.PerformLayout()
+    $form.PerformLayout()
+})
 
 $rail = New-Object System.Windows.Forms.FlowLayoutPanel
 $rail.Dock = 'Fill'
-$rail.Padding = New-Object System.Windows.Forms.Padding(16)
+$rail.Padding = New-Object System.Windows.Forms.Padding(16, 12, 16, 16)
 $rail.FlowDirection = 'TopDown'
 $rail.WrapContents = $false
 $rail.BackColor = [System.Drawing.Color]::FromArgb(243, 245, 249)
 $rail.AutoScroll = $true
 [void]$split.Panel1.Controls.Add($rail)
-function Add-RailLabel([string]$Text, [System.Drawing.Font]$Font = $null) { $label = New-Object System.Windows.Forms.Label; $label.Text = $Text; $label.Width = 250; $label.Height = 24; if ($Font) { $label.Font = $Font }; [void]$rail.Controls.Add($label); return $label }
+function Add-RailLabel([string]$Text, [System.Drawing.Font]$Font = $null) {
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $Text
+    $label.Width = 250
+    $label.AutoSize = $false
+    $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    if ($Font) {
+        $label.Font = $Font
+        $label.Height = [Math]::Max(28, [int][Math]::Ceiling($Font.GetHeight() + 8))
+    } else {
+        $label.Height = 24
+    }
+    [void]$rail.Controls.Add($label)
+    return $label
+}
 function Add-RailButton([string]$Text, [scriptblock]$Action) { $button = New-Object System.Windows.Forms.Button; $button.Text = $Text; $button.Width = 250; $button.Height = 34; $button.Add_Click($Action); [void]$rail.Controls.Add($button); return $button }
 Add-RailLabel 'Status' | Out-Null
 $script:Status = Add-RailLabel 'Stopped' (New-Object System.Drawing.Font('Segoe UI Semibold', 15))
@@ -229,12 +300,24 @@ $content.Dock = 'Fill'
 [void]$split.Panel2.Controls.Add($content)
 
 $eventsHeader = New-Object System.Windows.Forms.Label
-$eventsHeader.Text = 'Events / issues (status changes + WARN/ERROR; use Follow logs for full tail)'; $eventsHeader.Dock = 'Top'; $eventsHeader.Height = 28; $eventsHeader.Padding = New-Object System.Windows.Forms.Padding(10, 6, 0, 0)
-$eventsHeader.BackColor = [System.Drawing.Color]::FromArgb(32, 32, 32); $eventsHeader.ForeColor = [System.Drawing.Color]::White
-[void]$content.Controls.Add($eventsHeader)
+$eventsHeader.Text = 'Events / issues (status changes + WARN/ERROR; use Follow logs for full tail)'
+$eventsHeader.Dock = 'Top'
+$eventsHeader.Height = 28
+$eventsHeader.Padding = New-Object System.Windows.Forms.Padding(10, 6, 0, 0)
+$eventsHeader.BackColor = [System.Drawing.Color]::FromArgb(32, 32, 32)
+$eventsHeader.ForeColor = [System.Drawing.Color]::White
+
 $script:Events = New-Object System.Windows.Forms.RichTextBox
-$script:Events.Dock = 'Fill'; $script:Events.ReadOnly = $true; $script:Events.BorderStyle = 'None'; $script:Events.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 20); $script:Events.ForeColor = [System.Drawing.Color]::Gainsboro; $script:Events.Font = New-Object System.Drawing.Font('Consolas', 9)
+$script:Events.Dock = 'Fill'
+$script:Events.ReadOnly = $true
+$script:Events.BorderStyle = 'None'
+$script:Events.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 20)
+$script:Events.ForeColor = [System.Drawing.Color]::Gainsboro
+$script:Events.Font = New-Object System.Drawing.Font('Consolas', 10)
+$script:Events.WordWrap = $false
+$script:Events.HideSelection = $false
 [void]$content.Controls.Add($script:Events)
+[void]$content.Controls.Add($eventsHeader)
 
 function Write-CrashLog {
     param([string]$Context, $ErrorRecord)
@@ -253,16 +336,14 @@ $form.Add_Shown({
         Refresh-Status
         Update-LogTail
         $timer.Start()
-        # Forces a full repaint; some remote sessions leave custom-colored panels unpainted otherwise.
-        $form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
-        $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
-        $form.Invalidate($true)
-        $form.Update()
+        $form.Refresh()
     } catch { Write-CrashLog 'Shown' $_ }
 })
 $form.Add_FormClosed({ $timer.Stop() })
-try {
-    [void]$form.ShowDialog()
+Write-StartupLog 'Launch Control UI ready, opening window'
+[void]$form.ShowDialog()
+Write-StartupLog 'Launch Control closed'
 } catch {
-    Write-CrashLog 'ShowDialog' $_
+    Show-LaunchControlStartupError $_.Exception.Message
+    exit 1
 }
