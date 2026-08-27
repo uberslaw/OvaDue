@@ -1,0 +1,44 @@
+{
+  "includePaths": [
+    "app.py",
+    "requirements.txt",
+    "launch control.cmd",
+    "scripts",
+    "deploy",
+    ".streamlit"
+  ],
+  "excludePatterns": [
+    "**\\__pycache__\\**",
+    "**\\*.pyc",
+    "**\\*.pyo"
+  ],
+  "neverPackage": [
+    ".venv",
+    "uploads",
+    "data\\streamlit.log",
+    "data\\streamlit-error.log",
+    "data\\streamlit.pid",
+    "data\\smoke-out.log",
+    "data\\smoke-err.log",
+    "data\\diagnostics.requested",
+    "data\\launchcontrol-crash.log",
+    "data\\deploy.log"
+  ],
+  "preserveOnUpgrade": [
+    "uploads\\**",
+    "data\\delivered_orders.json",
+    "data\\streamlit.log",
+    "data\\streamlit-error.log",
+    "data\\streamlit.pid",
+    "data\\smoke-out.log",
+    "data\\smoke-err.log",
+    "data\\diagnostics.requested",
+    "data\\launchcontrol-crash.log",
+    "data\\deploy.log",
+    "data\\deployed-version.json"
+  ],
+  "ensureDirectories": [
+    "data",
+    "uploads"
+  ]
+}

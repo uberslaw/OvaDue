@@ -1,0 +1,107 @@
+﻿#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Test script to verify delay calculation works with actual data."""
+
+from pathlib import Path
+import pandas as pd
+import re
+import sys
+
+# Force UTF-8 output on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+def parse_standard_lt_to_days(value):
+    """Convert Standard LT to days for baseline calculation."""
+    if pd.isna(value):
+        return None
+
+    value_str = str(value).strip().upper()
+
+    # Try to extract number if it contains "WK" (weeks)
+    if "WK" in value_str:
+        # Extract first number before the dash or space
+        match = re.search(r'(\d+)', value_str)
+        if match:
+            weeks = int(match.group(1))
+            return weeks * 7  # Convert weeks to days
+
+    # Try to parse as a simple number (days)
+    try:
+        return int(float(value_str.split()[0]))  # Take first number
+    except (ValueError, IndexError):
+        return None
+
+def test_delay_calculation():
+    """Load data and test delay calculation."""
+
+    # Find latest XLS file
+    xls_files = sorted(Path('.').glob('*.xls'), reverse=True)
+    if not xls_files:
+        xls_files = sorted(Path('uploads').glob('*.xls'), reverse=True)
+
+    if not xls_files:
+        print("No XLS files found")
+        return
+
+    print(f"Loading: {xls_files[0].name}")
+    df = pd.read_excel(xls_files[0])
+
+    # Verify columns exist
+    required_cols = ['HPReceiveDate', 'PlannedDeliveryDate', 'Standard LT']
+    for col in required_cols:
+        if col not in df.columns:
+            print(f"Missing column: {col}")
+            return
+
+    print(f"All required columns found\n")
+
+    # Convert dates
+    df['HPReceiveDate'] = pd.to_datetime(df['HPReceiveDate'], errors='coerce')
+    df['PlannedDeliveryDate'] = pd.to_datetime(df['PlannedDeliveryDate'], errors='coerce')
+
+    print("Before conversion:")
+    print(f"  Standard LT samples: {df['Standard LT'].head(5).tolist()}")
+
+    # Parse Standard LT
+    df["StandardLTDays"] = df["Standard LT"].apply(parse_standard_lt_to_days)
+
+    print(f"\nAfter conversion:")
+    print(f"  StandardLTDays samples: {df['StandardLTDays'].head(5).tolist()}")
+    print(f"  StandardLTDays nulls: {df['StandardLTDays'].isna().sum()}")
+    print(f"  HPReceiveDate nulls: {df['HPReceiveDate'].isna().sum()}")
+    print(f"  PlannedDeliveryDate nulls: {df['PlannedDeliveryDate'].isna().sum()}\n")
+
+    # Calculate baseline and delay
+    df["BaselineExpectedDeliveryDate"] = df.apply(
+        lambda row: (pd.to_datetime(row["HPReceiveDate"]) + pd.to_timedelta(row["StandardLTDays"], unit="D"))
+        if pd.notna(row["HPReceiveDate"]) and pd.notna(row["StandardLTDays"]) else pd.NaT,
+        axis=1
+    )
+
+    df["DelayDays"] = (df["PlannedDeliveryDate"] - df["BaselineExpectedDeliveryDate"]).dt.days
+    df["DelayDays"] = df["DelayDays"].fillna(0).astype(int)
+    df["IsDelayed"] = df["DelayDays"] > 0
+    df["DelayWeeks"] = (df["DelayDays"] / 7.0).round(1)
+
+    # Show results
+    print("Delay Calculation Results:")
+    print(f"  Total rows: {len(df)}")
+    print(f"  Delayed rows: {df['IsDelayed'].sum()}")
+    print(f"  Non-delayed rows: {(~df['IsDelayed']).sum()}\n")
+
+    # Show some delayed orders
+    delayed = df[df['IsDelayed']].sort_values('DelayDays', ascending=False).head(10)
+    if len(delayed) > 0:
+        print("First 10 delayed orders (sorted by delay):")
+        cols_to_show = ['HPReceiveDate', 'PlannedDeliveryDate', 'Standard LT', 'BaselineExpectedDeliveryDate', 'DelayDays', 'DelayWeeks']
+        print(delayed[cols_to_show].to_string())
+    else:
+        print("No delayed orders found")
+        print("\nShowing first 10 orders for debugging:")
+        cols_to_show = ['HPReceiveDate', 'PlannedDeliveryDate', 'Standard LT', 'StandardLTDays', 'BaselineExpectedDeliveryDate', 'DelayDays']
+        print(df[cols_to_show].head(10).to_string())
+
+if __name__ == "__main__":
+    test_delay_calculation()

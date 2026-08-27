@@ -1,0 +1,9 @@
+{
+  "pushTarget": "\\\\10.34.9.41\\c$\\temp",
+  "upgradeSource": "C:\\temp",
+  "packageNamePrefix": "OvaDue",
+  "pythonLauncher": "py",
+  "pythonLauncherArgs": ["-3"],
+  "venvRelativePath": ".venv",
+  "requirementsFile": "requirements.txt"
+}

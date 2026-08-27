@@ -1,1 +1,121 @@
-2026-08-19 15:15:02.989 Uvicorn server started on 127.0.0.1:8501
+2026-08-26 15:13:57.968 Uvicorn server started on 127.0.0.1:8501
+2026-08-26 15:14:35.332 The widget with key "selected_offices" was created with a default value but also had its value set via the Session State API.
+Stack (most recent call last):
+  File "C:\Program Files\Python314\Lib\threading.py", line 1043, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Program Files\Python314\Lib\threading.py", line 1081, in _bootstrap_inner
+    self._context.run(self.run)
+  File "C:\Program Files\Python314\Lib\threading.py", line 1023, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 416, in _run_script_thread
+    self._run_script(request.rerun_data)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 841, in _run_script
+    ) = exec_func_with_error_handling(code_to_exec, ctx)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 136, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 816, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 1030, in <module>
+    main()
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 936, in main
+    selected_offices = st.sidebar.multiselect(
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\metrics_util.py", line 596, in wrapped_func
+    result = non_optional_func(*args, **kwargs)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\elements\widgets\multiselect.py", line 530, in multiselect
+    return self._multiselect(
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\elements\widgets\multiselect.py", line 578, in _multiselect
+    check_widget_policies(
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\elements\lib\policies.py", line 143, in check_widget_policies
+    check_session_state_rules(
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\elements\lib\policies.py", line 89, in check_session_state_rules
+    _LOGGER.warning(
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Program Files\Python314\Lib\asyncio\events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-08-26 15:21:27.242 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 136, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 816, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 1020, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 1004, in main
+    render_my_orders_page(df, current_snapshot, latest_order_line_keys)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 643, in render_my_orders_page
+    mask |= display[column].astype(str).str.contains(search_term, case=False, na=False)
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\pandas\core\strings\accessor.py", line 142, in wrapper
+    return func(self, *args, **kwargs)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\pandas\core\strings\accessor.py", line 1496, in contains
+    result = self._data.array._str_contains(pat, case, flags, na, regex)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\pandas\core\arrays\string_arrow.py", line 427, in _str_contains
+    return ArrowStringArrayMixin._str_contains(self, pat, case, flags, na, regex)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\pandas\core\arrays\_arrow_string_mixins.py", line 393, in _str_contains
+    result = pa_contains(self._pa_array, pat, ignore_case=not case)
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\pyarrow\compute.py", line 271, in wrapper
+    return func.call(args, options, memory_pool)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow/_compute.pyx", line 399, in pyarrow._compute.Function.call
+  File "pyarrow/error.pxi", line 155, in pyarrow.lib.pyarrow_internal_check_status
+  File "pyarrow/error.pxi", line 92, in pyarrow.lib.check_status
+pyarrow.lib.ArrowInvalid: Invalid regular expression: no argument for repetition operator: *
+2026-08-26 15:24:36.706 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 136, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 816, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 999, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 971, in main
+    if isinstance(selected_date_range, tuple) and len(selected_date_range) == 2:
+                  ^^^^^^^^^^^^^^^^^^^
+NameError: name 'selected_date_range' is not defined
+2026-08-26 15:24:41.603 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 136, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\.venv\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 816, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 999, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue\app.py", line 971, in main
+    if isinstance(selected_date_range, tuple) and len(selected_date_range) == 2:
+                  ^^^^^^^^^^^^^^^^^^^
+NameError: name 'selected_date_range' is not defined
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Program Files\Python314\Lib\asyncio\events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
+Traceback (most recent call last):
+  File "C:\Program Files\Python314\Lib\asyncio\events.py", line 94, in _run
+    self._context.run(self._callback, *self._args)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host

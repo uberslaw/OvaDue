@@ -109,7 +109,7 @@ function Start-Dashboard {
         [System.Windows.Forms.MessageBox]::Show('Missing .venv Python or app.py.', 'OvaDue Launch Control') | Out-Null
         return
     }
-    $args = '-m streamlit run "{0}" --server.headless true --server.address 127.0.0.1 --server.port 8501' -f $script:App
+    $args = '-m streamlit run "{0}" --server.headless true --server.address 0.0.0.0 --server.port 8501' -f $script:App
     $process = Start-Process -FilePath $script:Python -ArgumentList $args -WorkingDirectory $script:Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:LogFile -RedirectStandardError $script:ErrorLogFile
     Set-Content -LiteralPath $script:PidFile -Value $process.Id -NoNewline
     Add-EventLine "Started dashboard as PID $($process.Id)."
@@ -140,6 +140,33 @@ function Update-LogTail {
     } catch { }
 }
 
+. (Join-Path $PSScriptRoot 'OvaDue-Deploy.ps1')
+Initialize-OvaDueDeploy -Root $script:Root -LogAction {
+    param([string]$Message, [string]$Level = 'INFO')
+    Add-EventLine $Message $Level
+}
+
+function Invoke-DeployAction {
+    param(
+        [string]$Title,
+        [scriptblock]$Action
+    )
+
+    try {
+        Add-EventLine "$Title started..."
+        $result = & $Action
+        $summary = ($result.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join ', '
+        Add-EventLine "$Title completed. $summary"
+        [System.Windows.Forms.MessageBox]::Show("$Title completed successfully.`r`n$summary", 'OvaDue Launch Control') | Out-Null
+    } catch {
+        if (Get-Command Write-DeployLog -ErrorAction SilentlyContinue) {
+            Write-DeployLog "$Title failed: $($_.Exception.Message)" 'ERROR'
+        }
+        Add-EventLine "$Title failed: $($_.Exception.Message)" 'ERROR'
+        [System.Windows.Forms.MessageBox]::Show("$Title failed.`r`n$($_.Exception.Message)", 'OvaDue Launch Control', 'OK', 'Error') | Out-Null
+    }
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
 $form.Text = 'OvaDue Launch Control'; $form.Size = New-Object System.Drawing.Size(1040, 720); $form.MinimumSize = New-Object System.Drawing.Size(900, 600)
@@ -160,9 +187,24 @@ $body = New-Object System.Windows.Forms.Panel
 $body.Dock = 'Fill'
 [void]$form.Controls.Add($body)
 
+$split = New-Object System.Windows.Forms.SplitContainer
+$split.Dock = 'Fill'
+$split.FixedPanel = 'Panel1'
+$split.IsSplitterFixed = $true
+$split.SplitterDistance = 286
+$split.Panel1MinSize = 250
+$split.Panel2MinSize = 320
+$split.BackColor = [System.Drawing.Color]::FromArgb(243, 245, 249)
+[void]$body.Controls.Add($split)
+
 $rail = New-Object System.Windows.Forms.FlowLayoutPanel
-$rail.Dock = 'Left'; $rail.Width = 286; $rail.Padding = New-Object System.Windows.Forms.Padding(16); $rail.FlowDirection = 'TopDown'; $rail.WrapContents = $false; $rail.BackColor = [System.Drawing.Color]::FromArgb(243, 245, 249)
-[void]$body.Controls.Add($rail)
+$rail.Dock = 'Fill'
+$rail.Padding = New-Object System.Windows.Forms.Padding(16)
+$rail.FlowDirection = 'TopDown'
+$rail.WrapContents = $false
+$rail.BackColor = [System.Drawing.Color]::FromArgb(243, 245, 249)
+$rail.AutoScroll = $true
+[void]$split.Panel1.Controls.Add($rail)
 function Add-RailLabel([string]$Text, [System.Drawing.Font]$Font = $null) { $label = New-Object System.Windows.Forms.Label; $label.Text = $Text; $label.Width = 250; $label.Height = 24; if ($Font) { $label.Font = $Font }; [void]$rail.Controls.Add($label); return $label }
 function Add-RailButton([string]$Text, [scriptblock]$Action) { $button = New-Object System.Windows.Forms.Button; $button.Text = $Text; $button.Width = 250; $button.Height = 34; $button.Add_Click($Action); [void]$rail.Controls.Add($button); return $button }
 Add-RailLabel 'Status' | Out-Null
@@ -177,11 +219,14 @@ Add-RailButton 'Open Dashboard' { Start-Process 'http://127.0.0.1:8501' } | Out-
 Add-RailButton 'Open Uploads Folder' { Start-Process explorer.exe -ArgumentList $script:UploadsDir } | Out-Null
 Add-RailButton 'Open Logs Folder' { Start-Process explorer.exe -ArgumentList $script:DataDir } | Out-Null
 Add-RailButton 'Run Diagnostics' { Set-Content -LiteralPath (Join-Path $script:DataDir 'diagnostics.requested') -Value (Get-Date -Format o); Add-EventLine 'Diagnostics request recorded.' } | Out-Null
+Add-RailLabel 'Deploy' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
+Add-RailButton 'Install Server' { Invoke-DeployAction 'Install Server' { Invoke-OvaDueInstallServer } } | Out-Null
+Add-RailButton 'Package and Push Update' { Invoke-DeployAction 'Package and Push Update' { Invoke-OvaDuePackageAndPush } } | Out-Null
+Add-RailButton 'Upgrade from Push' { Invoke-DeployAction 'Upgrade from Push' { Invoke-OvaDueUpgradeFromPush -PidFile $script:PidFile } } | Out-Null
 
-# Second Fill container to the right of the rail, holding the events header + console (single Fill sibling each).
 $content = New-Object System.Windows.Forms.Panel
 $content.Dock = 'Fill'
-[void]$body.Controls.Add($content)
+[void]$split.Panel2.Controls.Add($content)
 
 $eventsHeader = New-Object System.Windows.Forms.Label
 $eventsHeader.Text = 'Events / issues (status changes + WARN/ERROR; use Follow logs for full tail)'; $eventsHeader.Dock = 'Top'; $eventsHeader.Height = 28; $eventsHeader.Padding = New-Object System.Windows.Forms.Padding(10, 6, 0, 0)
