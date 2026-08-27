@@ -166,22 +166,21 @@ function Update-LogTail {
     } catch { }
 }
 
-function Initialize-DeployModule {
-    if ($script:DeployInitialized) {
-        return
-    }
+$deployScript = Join-Path $PSScriptRoot 'OvaDue-Deploy.ps1'
+if (-not (Test-Path -LiteralPath $deployScript)) {
+    throw "Missing deploy script: $deployScript"
+}
+. $deployScript
+Initialize-OvaDueDeploy -Root $script:Root -LogAction {
+    param([string]$Message, [string]$Level = 'INFO')
+    Add-EventLine $Message $Level
+}
 
-    $deployScript = Join-Path $PSScriptRoot 'OvaDue-Deploy.ps1'
-    if (-not (Test-Path -LiteralPath $deployScript)) {
-        throw "Missing deploy script: $deployScript"
-    }
+function Show-OvaDueSetupHelp {
+    param([string]$Topic = 'overview')
 
-    . $deployScript
-    Initialize-OvaDueDeploy -Root $script:Root -LogAction {
-        param([string]$Message, [string]$Level = 'INFO')
-        Add-EventLine $Message $Level
-    }
-    $script:DeployInitialized = $true
+    $helpText = Get-OvaDueSetupHelp -Root $script:Root -Topic $Topic
+    [System.Windows.Forms.MessageBox]::Show($helpText, 'OvaDue Setup Help') | Out-Null
 }
 
 function Invoke-DeployAction {
@@ -191,22 +190,35 @@ function Invoke-DeployAction {
     )
 
     try {
-        Initialize-DeployModule
+        $missing = Test-OvaDueDeployLayout -Root $script:Root
+        if ($missing.Count -gt 0) {
+            throw ("Missing required files:`r`n- " + ($missing -join "`r`n- "))
+        }
+
         Add-EventLine "$Title started..."
         $result = & $Action
-        $summary = ($result.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join ', '
+        $summary = ''
+        if ($null -ne $result -and $result -is [System.Collections.IDictionary]) {
+            $summary = ($result.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join ', '
+        }
         Add-EventLine "$Title completed. $summary"
         [System.Windows.Forms.MessageBox]::Show("$Title completed successfully.`r`n$summary", 'OvaDue Launch Control') | Out-Null
     } catch {
-        if (Get-Command Write-DeployLog -ErrorAction SilentlyContinue) {
-            Write-DeployLog "$Title failed: $($_.Exception.Message)" 'ERROR'
-        }
-        Add-EventLine "$Title failed: $($_.Exception.Message)" 'ERROR'
-        [System.Windows.Forms.MessageBox]::Show("$Title failed.`r`n$($_.Exception.Message)", 'OvaDue Launch Control', 'OK', 'Error') | Out-Null
+        $message = $_.Exception.Message
+        Write-DeployLog "$Title failed: $message" 'ERROR'
+        Add-EventLine "$Title failed: $message" 'ERROR'
+
+        $helpTopic = 'overview'
+        if ($message -match 'Python was not found|virtual environment|pip|requirements') { $helpTopic = 'installServer' }
+        elseif ($message -match 'Git is not installed|git command failed|gitRepositoryUrl') { $helpTopic = 'installFromGit' }
+        elseif ($message -match 'Missing required files|Missing deploy script|deploy-config|package-include') { $helpTopic = 'missingFiles' }
+
+        $helpText = Get-OvaDueSetupHelp -Root $script:Root -Topic $helpTopic
+        $dialogText = "$Title failed.`r`n`r`n$message`r`n`r`n$helpText"
+        [System.Windows.Forms.MessageBox]::Show($dialogText, 'OvaDue Launch Control', 'OK', 'Error') | Out-Null
     }
 }
 
-$script:DeployInitialized = $false
 
 $form = New-Object System.Windows.Forms.Form
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
@@ -291,6 +303,7 @@ Add-RailButton 'Open Uploads Folder' { Start-Process explorer.exe -ArgumentList 
 Add-RailButton 'Open Logs Folder' { Start-Process explorer.exe -ArgumentList $script:DataDir } | Out-Null
 Add-RailButton 'Run Diagnostics' { Set-Content -LiteralPath (Join-Path $script:DataDir 'diagnostics.requested') -Value (Get-Date -Format o); Add-EventLine 'Diagnostics request recorded.' } | Out-Null
 Add-RailLabel 'Deploy' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
+Add-RailButton 'Setup Help' { Show-OvaDueSetupHelp } | Out-Null
 Add-RailButton 'Install from Git' { Invoke-DeployAction 'Install from Git' { Invoke-OvaDueInstallFromGit -LaunchControl } } | Out-Null
 Add-RailButton 'Install Server' { Invoke-DeployAction 'Install Server' { Invoke-OvaDueInstallServer } } | Out-Null
 Add-RailButton 'Package and Push Update' { Invoke-DeployAction 'Package and Push Update' { Invoke-OvaDuePackageAndPush } } | Out-Null

@@ -10,6 +10,8 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from streamlit_js_eval import streamlit_js_eval
 
+from ovadue.analysis_ui import render_analysis
+
 st.set_page_config(page_title="OvaDue", layout="wide")
 
 DATA_DIR = Path(__file__).parent
@@ -1039,7 +1041,16 @@ def set_app_page(page: str) -> None:
 def render_page_nav() -> None:
     page = st.session_state.get("app_page", "orders")
     st.sidebar.markdown("---")
-    if page == "orders":
+    if page != "orders":
+        st.sidebar.button(
+            "← Orders",
+            key="nav_orders",
+            type="secondary",
+            width="stretch",
+            on_click=set_app_page,
+            args=("orders",),
+        )
+    if page != "procurement":
         st.sidebar.button(
             "Procurement",
             key="nav_procurement",
@@ -1048,14 +1059,14 @@ def render_page_nav() -> None:
             on_click=set_app_page,
             args=("procurement",),
         )
-    else:
+    if page != "analytics":
         st.sidebar.button(
-            "← Orders",
-            key="nav_orders",
+            "Analytics",
+            key="nav_analytics",
             type="secondary",
             width="stretch",
             on_click=set_app_page,
-            args=("orders",),
+            args=("analytics",),
         )
 
 
@@ -1445,8 +1456,20 @@ def main() -> None:
     current_date = latest_snapshot(df)
     current_snapshot = df[df["SnapshotDate"] == current_date].copy() if pd.notna(current_date) else df.copy()
 
-    if st.session_state.get("app_page", "orders") == "procurement":
+    page = st.session_state.get("app_page", "orders")
+    if page == "procurement":
         render_procurement_page(current_snapshot, delivered_keys)
+    elif page == "analytics":
+        outstanding_tab, delivery_tab, analysis_tab = st.tabs(
+            ["Outstanding Orders", "Delivery Performance", "Analysis"]
+        )
+        with outstanding_tab:
+            render_outstanding_page(current_snapshot, LATE_OTD_THRESHOLD, LATE_DELIVERY_GRACE_DAYS)
+        with delivery_tab:
+            render_delivery_page(df, current_snapshot)
+        with analysis_tab:
+            # Handover 2.0 drop-in: Regional flux, Hardware, Offices by region, Performance (Top 3)
+            render_analysis(DATA_DIR)
     else:
         render_my_orders_page(df, current_snapshot, latest_order_line_keys)
 

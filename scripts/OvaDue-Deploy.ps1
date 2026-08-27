@@ -16,6 +16,128 @@ function Initialize-OvaDueDeploy {
     $script:DataDir = Join-Path $Root 'data'
 }
 
+function Test-OvaDueDeployLayout {
+    param([string]$Root)
+
+    $required = @(
+        'app.py',
+        'requirements.txt',
+        'launch control.cmd',
+        'scripts\OvaDue-LaunchControl.ps1',
+        'scripts\OvaDue-LaunchControl.cmd',
+        'scripts\OvaDue-Deploy.ps1',
+        'deploy\deploy-config.json',
+        'deploy\package-include.json',
+        'deploy\version.json'
+    )
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($relative in $required) {
+        $fullPath = Join-Path $Root ($relative -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $fullPath)) {
+            [void]$missing.Add($relative)
+        }
+    }
+    return @($missing)
+}
+
+function Get-OvaDueSetupHelp {
+    param(
+        [string]$Root,
+        [string]$Topic = 'overview'
+    )
+
+    $config = $null
+    try {
+        if (Test-Path -LiteralPath (Join-Path $Root 'deploy\deploy-config.json')) {
+            $config = Get-Content -LiteralPath (Join-Path $Root 'deploy\deploy-config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+    } catch { }
+
+    $repoUrl = if ($config -and $config.gitRepositoryUrl) { [string]$config.gitRepositoryUrl } else { 'https://github.com/uberslaw/OvaDue.git' }
+    $gitPath = if ($config -and $config.gitInstallPath) { [string]$config.gitInstallPath } else { 'C:\OvaDue' }
+    $branch = if ($config -and $config.gitBranch) { [string]$config.gitBranch } else { 'main' }
+
+    $manualInstall = @(
+        'Manual server setup (if buttons fail):'
+        "1. Install Python 3.11+ (python.org) and tick Add to PATH."
+        '2. Install Git for Windows (git-scm.com) if using git install.'
+        "3. Clone or copy the full app folder (must include scripts\ and deploy\)."
+        "   git clone --branch $branch $repoUrl `"$gitPath`""
+        "4. cd `"$gitPath`""
+        '5. py -3 -m venv .venv'
+        '6. .venv\Scripts\pip install -r requirements.txt'
+        '7. Double-click "launch control.cmd", then click Install Server or Start Dashboard.'
+    ) -join "`r`n"
+
+    $topics = @{
+        overview = @(
+            'OvaDue setup (pick one path):'
+            ''
+            'A) Install from Git (recommended on a new server)'
+            '   Needs: Git + Python on PATH.'
+            "   Clones/updates $repoUrl to $gitPath, installs .venv, opens Launch Control."
+            ''
+            'B) Install Server (this folder)'
+            '   Needs: Python on PATH.'
+            '   Creates .venv here and installs requirements.txt.'
+            ''
+            'C) Upgrade from Push'
+            '   Needs: an OvaDue_*.zip already copied to C:\temp.'
+            ''
+            'Required files in every copy/git clone:'
+            'app.py, requirements.txt, launch control.cmd, scripts\, deploy\'
+            ''
+            $manualInstall
+        ) -join "`r`n"
+        installServer = @(
+            'Install Server needs Python 3.11+ on PATH.'
+            ''
+            'Quick fix:'
+            '1. Install Python from python.org (tick Add to PATH).'
+            "2. Open PowerShell in: $Root"
+            '3. py -3 -m venv .venv'
+            '4. .venv\Scripts\pip install -r requirements.txt'
+            '5. Re-open Launch Control and click Start Dashboard.'
+            ''
+            'Or run Install Server again after Python is installed.'
+        ) -join "`r`n"
+        installFromGit = @(
+            'Install from Git needs Git for Windows and Python on PATH.'
+            ''
+            'Quick fix:'
+            '1. Install Git: https://git-scm.com/download/win'
+            '2. Install Python 3.11+ and tick Add to PATH.'
+            '3. Open PowerShell and run:'
+            "   git clone --branch $branch $repoUrl `"$gitPath`""
+            "   cd `"$gitPath`""
+            '   py -3 -m venv .venv'
+            '   .venv\Scripts\pip install -r requirements.txt'
+            '4. Run "launch control.cmd" from that folder.'
+            ''
+            "Edit deploy\deploy-config.json to change gitInstallPath (currently $gitPath)."
+        ) -join "`r`n"
+        missingFiles = @(
+            'This folder is missing files needed for deploy actions.'
+            ''
+            'You need the full OvaDue app, not just app.py.'
+            'Required: scripts\OvaDue-Deploy.ps1, scripts\OvaDue-LaunchControl.ps1, deploy\*.json'
+            ''
+            'Fix:'
+            "1. git clone --branch $branch $repoUrl `"$gitPath`""
+            '   OR copy the complete project folder from the dev machine.'
+            '2. Open Launch Control from that folder (launch control.cmd).'
+            ''
+            $manualInstall
+        ) -join "`r`n"
+    }
+
+    if ($topics.ContainsKey($Topic)) {
+        return $topics[$Topic]
+    }
+    return $topics['overview']
+}
+
 function Write-DeployLog {
     param(
         [string]$Message,
@@ -426,7 +548,7 @@ function Resolve-OvaDuePythonCommand {
         }
     }
 
-    throw 'Python was not found. Install Python 3.11+ or ensure the py launcher is available.'
+    throw 'Python was not found. Install Python 3.11+ from python.org (tick Add to PATH) or ensure the py launcher is available.'
 }
 
 function Invoke-OvaDueInstallServer {
@@ -511,7 +633,7 @@ function Resolve-GitCommand {
     if (Get-Command git -ErrorAction SilentlyContinue) {
         return (Get-Command git -ErrorAction SilentlyContinue).Source
     }
-    throw 'Git is not installed or not on PATH. Install Git for Windows first.'
+    throw 'Git is not installed or not on PATH. Install Git for Windows from https://git-scm.com/download/win'
 }
 
 function Invoke-GitCommand {
