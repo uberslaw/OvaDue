@@ -430,6 +430,24 @@ function Resolve-OvaDuePythonCommand {
 }
 
 function Invoke-OvaDueInstallServer {
+    param([string]$InstallRoot)
+
+    $restoreRoot = $null
+    if ($InstallRoot) {
+        $restoreRoot = $script:DeployRoot
+        Initialize-OvaDueDeploy -Root $InstallRoot -LogAction $script:DeployLogAction
+    }
+
+    try {
+        return Invoke-OvaDueInstallServerCore
+    } finally {
+        if ($restoreRoot) {
+            Initialize-OvaDueDeploy -Root $restoreRoot -LogAction $script:DeployLogAction
+        }
+    }
+}
+
+function Invoke-OvaDueInstallServerCore {
     $config = Get-OvaDueDeployConfig
     $rules = Get-OvaDueIncludeRules
     $python = Resolve-OvaDuePythonCommand
@@ -486,5 +504,159 @@ function Invoke-OvaDueInstallServer {
     return [ordered]@{
         VirtualEnvironment = $venvPath
         Python = $pythonExe
+    }
+}
+
+function Resolve-GitCommand {
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        return (Get-Command git -ErrorAction SilentlyContinue).Source
+    }
+    throw 'Git is not installed or not on PATH. Install Git for Windows first.'
+}
+
+function Invoke-GitCommand {
+    param(
+        [string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $git = Resolve-GitCommand
+    $displayArgs = ($Arguments | ForEach-Object {
+        if ($_ -match '\s') { '"{0}"' -f $_ } else { $_ }
+    }) -join ' '
+    Write-DeployLog "Running: git $displayArgs"
+
+    $process = Start-Process `
+        -FilePath $git `
+        -ArgumentList $Arguments `
+        -WorkingDirectory $WorkingDirectory `
+        -Wait `
+        -PassThru `
+        -NoNewWindow `
+        -RedirectStandardOutput (Join-Path $script:DataDir 'git-last.out.log') `
+        -RedirectStandardError (Join-Path $script:DataDir 'git-last.err.log')
+
+    if ($process.ExitCode -ne 0) {
+        $stderr = ''
+        $errPath = Join-Path $script:DataDir 'git-last.err.log'
+        if (Test-Path -LiteralPath $errPath) {
+            $stderr = (Get-Content -LiteralPath $errPath -Raw -ErrorAction SilentlyContinue).Trim()
+        }
+        throw "Git command failed (exit code $($process.ExitCode)): git $displayArgs${stderr}"
+    }
+}
+
+function Start-OvaDueLaunchControl {
+    param([string]$InstallRoot)
+
+    $config = Get-OvaDueDeployConfig
+    $launchControlPath = Join-Path $InstallRoot ([string]$config.launchControlRelativePath)
+    if (-not (Test-Path -LiteralPath $launchControlPath)) {
+        throw "Launch Control script not found: $launchControlPath"
+    }
+
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $powershell)) {
+        $powershell = 'powershell.exe'
+    }
+
+    Start-Process `
+        -FilePath $powershell `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-WindowStyle', 'Hidden', '-File', $launchControlPath) `
+        -WorkingDirectory (Split-Path -Parent $launchControlPath)
+
+    Write-DeployLog "Started Launch Control from $launchControlPath"
+    return $launchControlPath
+}
+
+function Invoke-OvaDueInstallFromGit {
+    param(
+        [switch]$LaunchControl
+    )
+
+    $config = Get-OvaDueDeployConfig
+    $rules = Get-OvaDueIncludeRules
+    $repoUrl = [string]$config.gitRepositoryUrl
+    $branch = [string]$config.gitBranch
+    if (-not $branch) { $branch = 'main' }
+    $installPath = [string]$config.gitInstallPath
+    if (-not $installPath) { $installPath = 'C:\OvaDue' }
+
+    if (-not $repoUrl) {
+        throw 'gitRepositoryUrl is not configured in deploy\deploy-config.json'
+    }
+
+    Resolve-GitCommand | Out-Null
+    $installPath = [System.IO.Path]::GetFullPath($installPath)
+    $parentPath = Split-Path -Parent $installPath
+    if ($parentPath -and -not (Test-Path -LiteralPath $parentPath)) {
+        New-Item -ItemType Directory -Path $parentPath -Force | Out-Null
+    }
+
+    $gitDir = Join-Path $installPath '.git'
+    if (Test-Path -LiteralPath $gitDir) {
+        Write-DeployLog "Updating existing git install at $installPath"
+        Invoke-GitCommand -WorkingDirectory $installPath -Arguments @('fetch', 'origin')
+        Invoke-GitCommand -WorkingDirectory $installPath -Arguments @('checkout', $branch)
+        Invoke-GitCommand -WorkingDirectory $installPath -Arguments @('pull', '--ff-only', 'origin', $branch)
+    } elseif (Test-Path -LiteralPath $installPath) {
+        $existingItems = @(Get-ChildItem -LiteralPath $installPath -Force -ErrorAction SilentlyContinue)
+        if ($existingItems.Count -gt 0) {
+            throw "Install path exists but is not a git repo: $installPath"
+        }
+        Write-DeployLog "Cloning $repoUrl into $installPath"
+        Invoke-GitCommand -WorkingDirectory $parentPath -Arguments @('clone', '--branch', $branch, '--single-branch', $repoUrl, (Split-Path -Leaf $installPath))
+    } else {
+        Write-DeployLog "Cloning $repoUrl into $installPath"
+        Invoke-GitCommand -WorkingDirectory $parentPath -Arguments @('clone', '--branch', $branch, '--single-branch', $repoUrl, (Split-Path -Leaf $installPath))
+    }
+
+    foreach ($dir in @($rules.ensureDirectories)) {
+        $targetDir = Join-Path $installPath ($dir -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+    }
+
+    $remoteHead = ''
+    try {
+        $remoteHead = (& git -C $installPath rev-parse --short HEAD 2>$null | Select-Object -First 1)
+    } catch { }
+
+    Stop-OvaDueDashboardForDeploy -PidFile (Join-Path $installPath 'data\streamlit.pid')
+    $serverInfo = Invoke-OvaDueInstallServer -InstallRoot $installPath
+
+    $versionPath = Join-Path $installPath 'deploy\version.json'
+    if (Test-Path -LiteralPath $versionPath) {
+        $versionInfo = Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $deployedInfo = [ordered]@{
+            appName = [string]$versionInfo.appName
+            apiVersion = [int]$versionInfo.apiVersion
+            packageId = 'git-install'
+            deployedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            deployedLocal = (Get-Date).ToString('o')
+            sourcePackage = $repoUrl
+            gitBranch = $branch
+            gitCommit = [string]$remoteHead
+            installPath = $installPath
+        }
+        $deployedPath = Join-Path $installPath 'data\deployed-version.json'
+        $deployedInfo | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $deployedPath -Encoding UTF8
+    }
+
+    $launchControlPath = $null
+    if ($LaunchControl) {
+        $launchControlPath = Start-OvaDueLaunchControl -InstallRoot $installPath
+    }
+
+    Write-DeployLog "Git install completed at $installPath"
+    return [ordered]@{
+        InstallPath = $installPath
+        Repository = $repoUrl
+        Branch = $branch
+        Commit = [string]$remoteHead
+        VirtualEnvironment = $serverInfo.VirtualEnvironment
+        LaunchControl = $launchControlPath
     }
 }

@@ -5,5 +5,9 @@
   "pythonLauncher": "py",
   "pythonLauncherArgs": ["-3"],
   "venvRelativePath": ".venv",
-  "requirementsFile": "requirements.txt"
+  "requirementsFile": "requirements.txt",
+  "gitRepositoryUrl": "https://github.com/uberslaw/OvaDue.git",
+  "gitBranch": "main",
+  "gitInstallPath": "C:\\OvaDue",
+  "launchControlRelativePath": "scripts\\OvaDue-LaunchControl.ps1"
 }

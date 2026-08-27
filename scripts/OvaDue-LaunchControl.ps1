@@ -291,6 +291,7 @@ Add-RailButton 'Open Uploads Folder' { Start-Process explorer.exe -ArgumentList 
 Add-RailButton 'Open Logs Folder' { Start-Process explorer.exe -ArgumentList $script:DataDir } | Out-Null
 Add-RailButton 'Run Diagnostics' { Set-Content -LiteralPath (Join-Path $script:DataDir 'diagnostics.requested') -Value (Get-Date -Format o); Add-EventLine 'Diagnostics request recorded.' } | Out-Null
 Add-RailLabel 'Deploy' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
+Add-RailButton 'Install from Git' { Invoke-DeployAction 'Install from Git' { Invoke-OvaDueInstallFromGit -LaunchControl } } | Out-Null
 Add-RailButton 'Install Server' { Invoke-DeployAction 'Install Server' { Invoke-OvaDueInstallServer } } | Out-Null
 Add-RailButton 'Package and Push Update' { Invoke-DeployAction 'Package and Push Update' { Invoke-OvaDuePackageAndPush } } | Out-Null
 Add-RailButton 'Upgrade from Push' { Invoke-DeployAction 'Upgrade from Push' { Invoke-OvaDueUpgradeFromPush -PidFile $script:PidFile } } | Out-Null
