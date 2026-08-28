@@ -1,6 +1,8 @@
 {
   "pushTarget": "\\\\10.34.9.41\\c$\\temp",
   "upgradeSource": "C:\\temp",
+  "migrationExportDirectory": "C:\\temp",
+  "migrationImportDirectory": "C:\\temp",
   "packageNamePrefix": "OvaDue",
   "pythonLauncher": "py",
   "pythonLauncherArgs": ["-3"],

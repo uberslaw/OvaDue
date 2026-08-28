@@ -1,0 +1,29 @@
+Generated: 2026-08-28T09:47:22.4079925+10:00
+OvaDue health check — WARNINGS
+Root: C:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue
+Mode: interactive; RepairSafe=True
+OK=16 WARN=2 ERROR=0 AutoFixed=0 NeedsInstallServer=False
+
+[OK] dir:data: Directory present: data
+[OK] dir:uploads: Directory present: uploads
+[OK] python: Python available: py -3 (Python 3.14.0)
+[OK] layout:app.py: Present: app.py
+[OK] layout:ovadue: Present: ovadue
+[OK] layout:pages: Present: pages
+[OK] layout:requirements.txt: Present: requirements.txt
+[OK] deploy-layout: Deploy layout files present.
+[OK] streamlit-config: Present: .streamlit\config.toml
+[OK] venv: Virtual environment usable: .venv
+[OK] packages: Key packages importable (7 from requirements.txt).
+[OK] config:upgradeSource: upgradeSource exists: C:\temp
+[OK] config:migrationExportDirectory: migrationExportDirectory exists: C:\temp
+[OK] config:migrationImportDirectory: migrationImportDirectory exists: C:\temp
+[WARN] config:pushTarget: pushTarget not reachable: \\10.34.9.41\c$\temp (Access to the path '\\10.34.9.41\c$\temp' is denied.)
+    Network share for Package and Push. Map/create the share, run as admin if needed for admin shares (\\server\c$), or change pushTarget. If this is an admin share, run Launch Control elevated or use a non-admin share path.
+[WARN] config:gitInstallPath: gitInstallPath path does not exist: C:\OvaDue
+    Only needed for Install from Git. Create parent folder or change gitInstallPath in deploy-config.json.
+[OK] port-8501: Port 8501 is free (no listener).
+[OK] streamlit-pid: No data\streamlit.pid (dashboard not supervised).
+
+NEXT: Follow UserAction guidance above (Python install, missing files, config paths).
+

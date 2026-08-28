@@ -1,6 +1,6 @@
 # OvaDue — Handover Notes
 
-Streamlit app for local office leads (and later, regional leads) to track HP laptop/hardware order backlog from OS report exports. Single file: [app.py](app.py).
+Streamlit app for local office leads (and later, regional leads) to track HP laptop/hardware order backlog from OS report exports. Single file: [app.py](../app.py).
 
 ## Run it
 
@@ -16,7 +16,7 @@ Data files: `.xls`/`.xlsx` OS reports are read from the repo root **and** `uploa
 
 ## Current state — "My Orders" page
 
-This is the primary/default view (sidebar → View → "My Orders"), built for local office leads. Function: `render_my_orders_page` in [app.py](app.py).
+This is the primary/default view (sidebar → View → "My Orders"), built for local office leads. Function: `render_my_orders_page` in [app.py](../app.py).
 
 - Orders are grouped into **cards**, one per office, one card per `(PurchaseOrderNo, HPOrderNo, PlannedDeliveryDate, SnapshotDate)` group — so multi-line orders with a shared delivery date collapse into a single card, but split into separate cards if line items on the same order have different planned delivery dates.
 - Card layout (3-column grid, stacks vertically on narrow screens — no horizontal scroll):

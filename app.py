@@ -11,11 +11,11 @@ from streamlit_autorefresh import st_autorefresh
 from streamlit_js_eval import streamlit_js_eval
 
 from ovadue.analysis_ui import render_analysis
+from ovadue.store import connect, load_raw_dataframe, sync_imports
 
 st.set_page_config(page_title="OvaDue", layout="wide")
 
 DATA_DIR = Path(__file__).parent
-UPLOADS_DIR = DATA_DIR / "uploads"
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 REGION_STORAGE_KEY = "ovadue_regions"
 OFFICE_STORAGE_KEY = "ovadue_offices"
@@ -295,17 +295,6 @@ def extract_snapshot_date(filename: str) -> pd.Timestamp | pd.NaT:
     return pd.to_datetime(match.group(1), errors="coerce")
 
 
-def discover_data_files(folder: Path) -> list[Path]:
-    UPLOADS_DIR.mkdir(exist_ok=True)
-    root_files = [file for pattern in ("*.xls", "*.xlsx") for file in folder.glob(pattern)]
-    upload_files = [file for pattern in ("*.xls", "*.xlsx") for file in UPLOADS_DIR.rglob(pattern)]
-    return sorted({file.resolve() for file in root_files + upload_files})
-
-
-def data_file_signature(files: list[Path]) -> tuple[tuple[str, int, int], ...]:
-    return tuple((str(file), file.stat().st_mtime_ns, file.stat().st_size) for file in files)
-
-
 def parse_standard_lt_bounds(value: object) -> tuple[int | None, int | None]:
     """Return lower/upper Standard LT bounds in days from values like '6 - 8 WK' or '23'."""
     if pd.isna(value):
@@ -333,30 +322,15 @@ def parse_standard_lt_to_days(value: object) -> int | None:
 
 
 @st.cache_data(show_spinner=False)
-def load_all_data(files_signature: tuple[tuple[str, int, int], ...]) -> pd.DataFrame:
-    files = [Path(file_path) for file_path, _, _ in files_signature]
-    if not files:
+def load_all_data(db_signature: tuple[str, int, int]) -> pd.DataFrame:
+    conn = connect(DATA_DIR)
+    try:
+        df = load_raw_dataframe(conn)
+    finally:
+        conn.close()
+
+    if df.empty:
         return pd.DataFrame()
-
-    frames: list[pd.DataFrame] = []
-    for file in files:
-        try:
-            engine = "xlrd" if file.suffix.lower() == ".xls" else None
-            frame = pd.read_excel(file, sheet_name=0, engine=engine)
-        except Exception as exc:
-            st.warning(f"Skipping {file.name}: {exc}")
-            continue
-
-        frame["SnapshotFile"] = file.name
-        frame["SnapshotDate"] = extract_snapshot_date(file.name)
-        if frame["SnapshotDate"].isna().all():
-            frame["SnapshotDate"] = pd.Timestamp(file.stat().st_mtime, unit="s").normalize()
-        frames.append(frame)
-
-    if not frames:
-        return pd.DataFrame()
-
-    df = pd.concat(frames, ignore_index=True)
 
     # Do not coerce Standard LT — values are week-range text like "10 - 14 WK".
     for col in ["OrderedQuantity", "NetLineDollarPrice", "OTD Days", "OTD weeks"]:
@@ -1327,14 +1301,18 @@ def main() -> None:
 
     ensure_delivered_orders_loaded()
 
-    # Each active dashboard session rescans the data directory every hour.
+    # Each active dashboard session rescans uploads/ every hour for new reports.
     st_autorefresh(interval=60 * 60 * 1000, key="hourly_data_check")
-    files = discover_data_files(DATA_DIR)
-    file_signature = data_file_signature(files)
+    db_signature, import_warnings = sync_imports(DATA_DIR)
+    for warning in import_warnings:
+        st.warning(warning)
 
-    df_all = load_all_data(file_signature)
+    df_all = load_all_data(db_signature)
     if df_all.empty:
-        st.error("No readable .xls or .xlsx files were found in this folder or uploads directory.")
+        st.error(
+            "No imported report history found. Put new .xls or .xlsx files in uploads\\ "
+            "and use Refresh data now."
+        )
         return
 
     latest_snapshot_date = latest_snapshot(df_all)

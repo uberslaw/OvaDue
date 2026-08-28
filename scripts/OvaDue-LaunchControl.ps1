@@ -1,8 +1,4 @@
-#Requires -Version 5.1
-try {
-    Add-Type -Namespace OvaDueNative -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(int value);'
-    [void][OvaDueNative.Dpi]::SetProcessDpiAwarenessContext(-4) # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
-} catch { }
+﻿#Requires -Version 5.1
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -21,6 +17,26 @@ $script:LastStatus = ''
 $script:LogOffset = [int64]0
 $script:FollowLogs = $false
 $script:ConsoleChars = 0
+$script:DashboardPort = 8501
+$script:DashboardHealthUrl = 'http://127.0.0.1:8501/_stcore/health'
+$script:DashboardUrl = 'http://127.0.0.1:8501'
+
+function Initialize-LaunchControlConfig {
+    $configPath = Join-Path $script:Root 'launch control\launch-control.json'
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        $configPath = Join-Path $PSScriptRoot 'launch-control.json'
+    }
+    try {
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        if ($config.processFallback.port) {
+            $script:DashboardPort = [int]$config.processFallback.port
+        }
+        if ($config.healthUrl) {
+            $script:DashboardHealthUrl = [string]$config.healthUrl
+        }
+    } catch { }
+    $script:DashboardUrl = "http://127.0.0.1:$($script:DashboardPort)"
+}
 
 function Write-StartupLog {
     param([string]$Message)
@@ -48,7 +64,8 @@ function Show-LaunchControlStartupError {
 
 try {
 New-Item -ItemType Directory -Path $script:DataDir, $script:UploadsDir -Force | Out-Null
-Write-StartupLog 'Launch Control starting'
+Initialize-LaunchControlConfig
+Write-StartupLog "Launch Control starting (dashboard port $($script:DashboardPort))"
 
 function Get-DashboardPid {
     if (-not (Test-Path -LiteralPath $script:PidFile)) { return 0 }
@@ -64,9 +81,22 @@ function Get-DashboardPid {
     return 0
 }
 
-function Get-StreamlitListenerPid {
+function Get-DashboardListeningPort {
+    param([int]$ProcessId)
+    if ($ProcessId -le 0) { return 0 }
     try {
-        $listener = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction Stop | Select-Object -First 1
+        $listener = Get-NetTCPConnection -OwningProcess $ProcessId -State Listen -ErrorAction Stop |
+            Where-Object { $_.LocalPort -gt 0 } |
+            Select-Object -First 1
+        if ($listener) { return [int]$listener.LocalPort }
+    } catch { }
+    return 0
+}
+
+function Get-StreamlitListenerPid {
+    param([int]$Port = $script:DashboardPort)
+    try {
+        $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -First 1
         if ($listener -and $listener.OwningProcess -gt 0) {
             return [int]$listener.OwningProcess
         }
@@ -91,8 +121,11 @@ function Add-EventLine {
 function Test-DashboardHealth {
     param([int]$ProcessId)
     if ($ProcessId -le 0) { return $false }
+    $port = Get-DashboardListeningPort -ProcessId $ProcessId
+    if ($port -le 0) { $port = $script:DashboardPort }
+    $healthUrl = "http://127.0.0.1:$port/_stcore/health"
     try {
-        $request = [System.Net.WebRequest]::Create('http://127.0.0.1:8501/_stcore/health')
+        $request = [System.Net.WebRequest]::Create($healthUrl)
         $request.Timeout = 750
         $response = $request.GetResponse()
         $response.Close()
@@ -110,16 +143,25 @@ function Refresh-Status {
         }
     }
     $healthy = Test-DashboardHealth -ProcessId $processId
+    $listeningPort = if ($processId -gt 0) { Get-DashboardListeningPort -ProcessId $processId } else { 0 }
+    $displayPort = if ($listeningPort -gt 0) { $listeningPort } else { $script:DashboardPort }
     if ($processId -gt 0) {
-        $script:Status.Text = if ($healthy) { 'Running' } else { 'Starting' }
+        $script:Status.Text = if ($healthy) { "Running on port $displayPort" } else { 'Starting' }
         $script:Status.ForeColor = if ($healthy) { [System.Drawing.Color]::ForestGreen } else { [System.Drawing.Color]::DarkOrange }
-        $script:PidLabel.Text = "PID $processId"
+        $script:PidLabel.Text = "PID $processId · port $displayPort"
+        if ($listeningPort -gt 0) {
+            $script:PortLabel.Text = "Port $listeningPort (listening)"
+        } else {
+            $script:PortLabel.Text = "Port $($script:DashboardPort) (starting)"
+        }
         $script:Health.Text = if ($healthy) { 'Health: ok' } else { 'Health: starting or unavailable' }
     } else {
         $script:Status.Text = 'Stopped'; $script:Status.ForeColor = [System.Drawing.Color]::Firebrick
-        $script:PidLabel.Text = 'PID -'; $script:Health.Text = 'Health: not running'
+        $script:PidLabel.Text = 'PID -'
+        $script:PortLabel.Text = "Port $($script:DashboardPort) (not listening)"
+        $script:Health.Text = 'Health: not running'
     }
-    $state = "$($script:Status.Text)|$processId|$($script:Health.Text)"
+    $state = "$($script:Status.Text)|$processId|$displayPort|$($script:Health.Text)"
     if ($state -ne $script:LastStatus) {
         Add-EventLine "Status changed: $($script:Status.Text), $($script:PidLabel.Text)"
         $script:LastStatus = $state
@@ -135,7 +177,7 @@ function Start-Dashboard {
         [System.Windows.Forms.MessageBox]::Show('Missing .venv Python or app.py.', 'OvaDue Launch Control') | Out-Null
         return
     }
-    $streamlitArgs = '-m streamlit run "{0}" --server.headless true --server.address 0.0.0.0 --server.port 8501' -f $script:App
+    $streamlitArgs = '-m streamlit run "{0}" --server.headless true --server.address 0.0.0.0 --server.port {1}' -f $script:App, $script:DashboardPort
     $process = Start-Process -FilePath $script:Python -ArgumentList $streamlitArgs -WorkingDirectory $script:Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $script:LogFile -RedirectStandardError $script:ErrorLogFile
     Set-Content -LiteralPath $script:PidFile -Value $process.Id -NoNewline
     Add-EventLine "Started dashboard as PID $($process.Id)."
@@ -212,10 +254,208 @@ function Invoke-DeployAction {
         if ($message -match 'Python was not found|virtual environment|pip|requirements') { $helpTopic = 'installServer' }
         elseif ($message -match 'Git is not installed|git command failed|gitRepositoryUrl') { $helpTopic = 'installFromGit' }
         elseif ($message -match 'Missing required files|Missing deploy script|deploy-config|package-include') { $helpTopic = 'missingFiles' }
+        elseif ($message -match 'migration|Migration pack|OvaDue_Migration_') { $helpTopic = 'migration' }
 
         $helpText = Get-OvaDueSetupHelp -Root $script:Root -Topic $helpTopic
         $dialogText = "$Title failed.`r`n`r`n$message`r`n`r`n$helpText"
         [System.Windows.Forms.MessageBox]::Show($dialogText, 'OvaDue Launch Control', 'OK', 'Error') | Out-Null
+    }
+}
+
+function Get-MigrationDialogDirectory {
+    param([ValidateSet('export','import')]$Mode)
+
+    $dir = if ($Mode -eq 'export') {
+        Resolve-OvaDueMigrationExportDirectory
+    } else {
+        $config = Get-OvaDueDeployConfig
+        $configured = [string]$config.migrationImportDirectory
+        if ($configured) {
+            [System.IO.Path]::GetFullPath($configured)
+        } elseif ([string]$config.upgradeSource) {
+            [System.IO.Path]::GetFullPath([string]$config.upgradeSource)
+        } else {
+            'C:\temp'
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    return $dir
+}
+
+function Invoke-BackupMigrationPackUi {
+    $dialog = New-Object System.Windows.Forms.SaveFileDialog
+    $dialog.Title = 'Save OvaDue migration pack'
+    $dialog.Filter = 'OvaDue migration pack (*.zip)|*.zip'
+    $dialog.FileName = ("OvaDue_Migration_{0}_{1}.zip" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $dialog.InitialDirectory = Get-MigrationDialogDirectory -Mode export
+    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Add-EventLine 'Backup Migration Pack cancelled.'
+        return
+    }
+    $zipPath = $dialog.FileName
+    Invoke-DeployAction 'Backup Migration Pack' {
+        Invoke-OvaDueExportMigrationPack -OutputZipPath $zipPath
+    }
+}
+
+function Invoke-ImportMigrationPackUi {
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Title = 'Select OvaDue migration pack to import'
+    $dialog.Filter = 'OvaDue migration pack (*.zip)|*.zip|All files (*.*)|*.*'
+    $dialog.InitialDirectory = Get-MigrationDialogDirectory -Mode import
+    if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+        Add-EventLine 'Import Migration Pack cancelled.'
+        return
+    }
+
+    $zipPath = $dialog.FileName
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        ("Import will overwrite matching data/config paths in:`r`n{0}`r`n`r`nPack:`r`n{1}`r`n`r`nApp code is not replaced. Continue?" -f $script:Root, $zipPath),
+        'Import Migration Pack',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    )
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+        Add-EventLine 'Import Migration Pack cancelled.'
+        return
+    }
+
+    Invoke-DeployAction 'Import Migration Pack' {
+        Invoke-OvaDueImportMigrationPack -ZipPath $zipPath -PidFile $script:PidFile
+    }
+}
+
+function Write-HealthIssuesToEvents {
+    param($Result)
+
+    if (-not $Result) { return }
+    Add-EventLine ("Health: {0} (OK={1} WARN={2} ERROR={3} AutoFixed={4})" -f `
+        $Result.Status, $Result.OkCount, $Result.WarnCount, $Result.ErrorCount, $Result.AutoFixedCount)
+    foreach ($issue in @($Result.Issues)) {
+        if ($issue.Severity -eq 'OK') { continue }
+        $level = if ($issue.Severity -eq 'ERROR') { 'ERROR' } elseif ($issue.Severity -eq 'WARN') { 'WARN' } else { 'INFO' }
+        $suffix = if ($issue.AutoFixed) { ' [AUTO-FIXED]' } else { '' }
+        Add-EventLine ("{0}: {1}{2}" -f $issue.Id, $issue.Message, $suffix) $level
+    }
+    if ($Result.ReportPath -and (Test-Path -LiteralPath $Result.ReportPath)) {
+        Add-EventLine "Self-heal report: $($Result.ReportPath)"
+    }
+}
+
+function Invoke-StartupHealthCheck {
+    try {
+        $result = Invoke-OvaDueHealthCheck -RepairSafe -StartupMode
+        Write-HealthIssuesToEvents -Result $result
+        if ($result.NeedsInstallServer) {
+            Add-EventLine 'Runtime needs Install Server (venv/packages). Click Check & Repair or Install Server.' 'WARN'
+        }
+        if ($result.Status -eq 'UNHEALTHY') {
+            Add-EventLine 'Startup health: issues found. Open Check & Repair for guided steps.' 'WARN'
+        }
+    } catch {
+        Add-EventLine "Startup health check failed: $($_.Exception.Message)" 'WARN'
+        Write-StartupLog "Startup health check failed: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-CheckAndRepairUi {
+    Add-EventLine 'Check & Repair started...'
+    try {
+        $result = Invoke-OvaDueHealthCheck -RepairSafe -WriteReport
+        Write-HealthIssuesToEvents -Result $result
+
+        if ($result.NeedsInstallServer) {
+            if (-not $result.PythonOk) {
+                $help = Get-OvaDueSetupHelp -Root $script:Root -Topic 'installServer'
+                $msg = @"
+Check & Repair found a broken or missing Python runtime environment, and Python/py is not available on PATH.
+
+Install Python first, then run Check & Repair again.
+
+$help
+
+Full report: $($result.ReportPath)
+"@
+                [System.Windows.Forms.MessageBox]::Show($msg.Trim(), 'Check & Repair - Python required', 'OK', 'Error') | Out-Null
+                return
+            }
+
+            $confirm = [System.Windows.Forms.MessageBox]::Show(
+                @"
+Check & Repair found a missing or broken .venv / packages (common after copying the whole folder to a new PC).
+
+Install Server will recreate .venv and run: pip install -r requirements.txt
+This can take several minutes and needs network access for pip.
+
+Root: $($script:Root)
+
+Continue with Install Server?
+"@.Trim(),
+                'Check & Repair - Install Server',
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($confirm -eq [System.Windows.Forms.DialogResult]::Yes) {
+                Invoke-DeployAction 'Install Server (from Check & Repair)' {
+                    Invoke-OvaDueInstallServer
+                }
+                $result = Invoke-OvaDueHealthCheck -RepairSafe -WriteReport
+                Write-HealthIssuesToEvents -Result $result
+            } else {
+                Add-EventLine 'Install Server declined. Click Install Server later after Python is ready.' 'WARN'
+            }
+        }
+
+        $title = "Check & Repair - $($result.Status)"
+        $icon = if ($result.Status -eq 'HEALTHY') {
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        } elseif ($result.Status -eq 'WARNINGS') {
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        } else {
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        }
+
+        $userSteps = @($result.Issues | Where-Object { $_.Severity -ne 'OK' -and $_.Guidance } | ForEach-Object {
+            "- $($_.Id): $($_.Message)`r`n  $($_.Guidance)"
+        })
+        $stepsBlock = if ($userSteps.Count -gt 0) {
+            "`r`n`r`nActions / guidance:`r`n" + ($userSteps -join "`r`n`r`n")
+        } else {
+            "`r`n`r`nNo further action required. You can click Start Dashboard."
+        }
+
+        $body = @"
+Status: $($result.Status)
+OK=$($result.OkCount)  WARN=$($result.WarnCount)  ERROR=$($result.ErrorCount)  AutoFixed=$($result.AutoFixedCount)
+
+Report written to:
+$($result.ReportPath)
+$stepsBlock
+
+Next steps if healthy:
+1. Click Start Dashboard
+2. Click Open Dashboard (http://127.0.0.1:8501)
+"@.Trim()
+
+        # MessageBox has practical length limits; truncate but keep report path
+        if ($body.Length -gt 3500) {
+            $body = $body.Substring(0, 3400) + "`r`n`r`n...(truncated)`r`nSee full report:`r`n$($result.ReportPath)"
+        }
+        [System.Windows.Forms.MessageBox]::Show($body, $title, 'OK', $icon) | Out-Null
+        Add-EventLine "Check & Repair finished: $($result.Status)"
+    } catch {
+        $message = $_.Exception.Message
+        Add-EventLine "Check & Repair failed: $message" 'ERROR'
+        $help = Get-OvaDueSetupHelp -Root $script:Root -Topic 'healthCheck'
+        [System.Windows.Forms.MessageBox]::Show(
+            "Check & Repair failed.`r`n`r`n$message`r`n`r`n$help",
+            'OvaDue Launch Control',
+            'OK',
+            'Error'
+        ) | Out-Null
     }
 }
 
@@ -237,7 +477,7 @@ $title.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 16)
 $title.Location = New-Object System.Drawing.Point(18, 13)
 [void]$header.Controls.Add($title)
 $subTitle = New-Object System.Windows.Forms.Label
-$subTitle.Text = 'Start, stop, diagnose, and inspect the local Streamlit dashboard process.'
+$subTitle.Text = 'Start, stop, diagnose, Check & Repair, deploy, and migrate the local Streamlit dashboard.'
 $subTitle.AutoSize = $true
 $subTitle.ForeColor = [System.Drawing.Color]::Gainsboro
 $subTitle.Location = New-Object System.Drawing.Point(20, 46)
@@ -292,22 +532,31 @@ function Add-RailLabel([string]$Text, [System.Drawing.Font]$Font = $null) {
 function Add-RailButton([string]$Text, [scriptblock]$Action) { $button = New-Object System.Windows.Forms.Button; $button.Text = $Text; $button.Width = 250; $button.Height = 34; $button.Add_Click($Action); [void]$rail.Controls.Add($button); return $button }
 Add-RailLabel 'Status' | Out-Null
 $script:Status = Add-RailLabel 'Stopped' (New-Object System.Drawing.Font('Segoe UI Semibold', 15))
-$script:PidLabel = Add-RailLabel 'PID -'; $script:Health = Add-RailLabel 'Health: not checked'; Add-RailLabel 'Mode: supervised Streamlit session process' | Out-Null
+$script:PidLabel = Add-RailLabel 'PID -'
+$script:PortLabel = Add-RailLabel "Port $($script:DashboardPort) (not listening)"
+$script:Health = Add-RailLabel 'Health: not checked'
+Add-RailLabel 'Mode: supervised Streamlit session process' | Out-Null
 Add-RailButton 'Start Dashboard' { Start-Dashboard; Refresh-Status } | Out-Null
 Add-RailButton 'Stop Dashboard' { Stop-Dashboard; Refresh-Status } | Out-Null
 Add-RailButton 'Restart Dashboard' { Stop-Dashboard; Start-Sleep -Milliseconds 400; Start-Dashboard; Refresh-Status } | Out-Null
 Add-RailButton 'Refresh Status' { Refresh-Status } | Out-Null
 $follow = Add-RailButton 'Follow Logs: OFF' { $script:FollowLogs = -not $script:FollowLogs; $this.Text = if ($script:FollowLogs) { 'Follow Logs: ON' } else { 'Follow Logs: OFF' }; Add-EventLine "Follow logs: $($script:FollowLogs)" }
-Add-RailButton 'Open Dashboard' { Start-Process 'http://127.0.0.1:8501' } | Out-Null
+Add-RailButton 'Open Dashboard' { Start-Process $script:DashboardUrl } | Out-Null
 Add-RailButton 'Open Uploads Folder' { Start-Process explorer.exe -ArgumentList $script:UploadsDir } | Out-Null
 Add-RailButton 'Open Logs Folder' { Start-Process explorer.exe -ArgumentList $script:DataDir } | Out-Null
 Add-RailButton 'Run Diagnostics' { Set-Content -LiteralPath (Join-Path $script:DataDir 'diagnostics.requested') -Value (Get-Date -Format o); Add-EventLine 'Diagnostics request recorded.' } | Out-Null
+Add-RailButton 'Check & Repair' { Invoke-CheckAndRepairUi } | Out-Null
 Add-RailLabel 'Deploy' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
 Add-RailButton 'Setup Help' { Show-OvaDueSetupHelp } | Out-Null
 Add-RailButton 'Install from Git' { Invoke-DeployAction 'Install from Git' { Invoke-OvaDueInstallFromGit -LaunchControl } } | Out-Null
 Add-RailButton 'Install Server' { Invoke-DeployAction 'Install Server' { Invoke-OvaDueInstallServer } } | Out-Null
 Add-RailButton 'Package and Push Update' { Invoke-DeployAction 'Package and Push Update' { Invoke-OvaDuePackageAndPush } } | Out-Null
 Add-RailButton 'Upgrade from Push' { Invoke-DeployAction 'Upgrade from Push' { Invoke-OvaDueUpgradeFromPush -PidFile $script:PidFile } } | Out-Null
+Add-RailLabel 'Migration' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
+Add-RailButton 'Backup Migration Pack' { Invoke-BackupMigrationPackUi } | Out-Null
+Add-RailButton 'Import Migration Pack' { Invoke-ImportMigrationPackUi } | Out-Null
+Add-RailButton 'Migration Help' { Show-OvaDueSetupHelp -Topic 'migration' } | Out-Null
+Add-RailButton 'Health Check Help' { Show-OvaDueSetupHelp -Topic 'healthCheck' } | Out-Null
 
 $content = New-Object System.Windows.Forms.Panel
 $content.Dock = 'Fill'
@@ -349,6 +598,7 @@ $form.Add_Shown({
         Add-EventLine 'Launch Control ready. Closing this window does not stop the dashboard.'
         Refresh-Status
         Update-LogTail
+        Invoke-StartupHealthCheck
         $timer.Start()
         $form.Refresh()
     } catch { Write-CrashLog 'Shown' $_ }

@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+data/ovadue.db
+data/*.log
+data/*.pid
+uploads/
+imported data/

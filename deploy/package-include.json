@@ -3,6 +3,7 @@
     "app.py",
     "requirements.txt",
     "launch control.cmd",
+    "launch control",
     "scripts",
     "deploy",
     ".streamlit"
@@ -26,6 +27,8 @@
   ],
   "preserveOnUpgrade": [
     "uploads\\**",
+    "imported data\\**",
+    "data\\ovadue.db",
     "data\\delivered_orders.json",
     "data\\streamlit.log",
     "data\\streamlit-error.log",
@@ -39,6 +42,40 @@
   ],
   "ensureDirectories": [
     "data",
-    "uploads"
+    "uploads",
+    "imported data"
+  ],
+  "migrationPaths": [
+    "uploads",
+    "imported data",
+    "data\\ovadue.db",
+    "data\\delivered_orders.json",
+    "data\\deployed-version.json",
+    "deploy\\deploy-config.json",
+    ".streamlit",
+    "launch control\\launch-control.json"
+  ],
+  "migrationExcludePatterns": [
+    "**\\__pycache__\\**",
+    "**\\*.pyc",
+    "**\\*.pyo",
+    "**\\*.tmp",
+    "**\\~$*"
+  ],
+  "migrationNeverPackage": [
+    "data\\streamlit.log",
+    "data\\streamlit-error.log",
+    "data\\streamlit.pid",
+    "data\\smoke-out.log",
+    "data\\smoke-err.log",
+    "data\\diagnostics.requested",
+    "data\\launchcontrol-crash.log",
+    "data\\launchcontrol-startup.log",
+    "data\\deploy.log",
+    "data\\git-last.out.log",
+    "data\\git-last.err.log",
+    "data\\install-verify.out.log",
+    "data\\install-verify.err.log",
+    ".venv"
   ]
 }

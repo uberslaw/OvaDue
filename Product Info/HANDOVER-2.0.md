@@ -8,7 +8,7 @@ Every widget label, tab name, default, and session_state key below is quoted fro
 
 Canonical files:
 
-- Document: `C:\OvaDue\HANDOVER-2.0.md` (this file; not `HANDOVER.md`)
+- Document: `C:\OvaDue\Product Info\HANDOVER-2.0.md` (this file; not `handover.md`)
 - Zip: `C:\OvaDue\handover-2.0.zip`
 
 ---
@@ -58,8 +58,8 @@ Reproduce this information architecture and scoring in the live site. Use `ovadu
 | Home snippet | `C:\OvaDue\app.py` | Title, caption, snapshot-count metric — merge into the live Home |
 | Analysis page | `C:\OvaDue\pages\1_Analysis.py` | Entire analysis UI (four tabs) |
 | Package | `C:\OvaDue\ovadue\` | `load.py`, `offices.py`, `metrics.py`, `charts.py`, `ui.py`, `__init__.py` |
-| This handover | `C:\OvaDue\HANDOVER-2.0.md` | Canonical doc (zip root) |
-| Older handover | `C:\OvaDue\HANDOVER.md` | Superseded; do not treat as source of truth |
+| This handover | `C:\OvaDue\Product Info\HANDOVER-2.0.md` | Canonical doc |
+| Older handover | `C:\OvaDue\Product Info\handover.md` | Superseded; do not treat as source of truth |
 | Zip output | `C:\OvaDue\handover-2.0.zip` | This drop-in package |
 | Older zip | `C:\OvaDue\OvaDue-handover.zip` | Superseded |
 | HP reports | **Not in this zip** | Live app already has them; on this machine they sit in `C:\OvaDue\data\` |
@@ -199,7 +199,7 @@ If `close_year` is set: closed rows filtered to `closed_at.dt.year == close_year
 | `C:\OvaDue\ovadue\metrics.py` | Lifecycle, flux, hardware outcomes, office scorecard, streaks. **Scoring source of truth.** |
 | `C:\OvaDue\ovadue\charts.py` | Plotly figures + region color maps. |
 | `C:\OvaDue\ovadue\ui.py` | CSS injection, Appearance, expand/restore, linked scatter HTML. |
-| `C:\OvaDue\HANDOVER-2.0.md` | This document. |
+| `C:\OvaDue\Product Info\HANDOVER-2.0.md` | This document. |
 
 **`ovadue.load`**
 
