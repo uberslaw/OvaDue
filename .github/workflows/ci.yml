@@ -20,7 +20,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pip-audit
       - name: Tests
-        run: pytest -q
+        run: PYTHONPATH=. pytest -q
       - name: Dependency audit
         continue-on-error: true
         run: pip-audit -r requirements.txt
