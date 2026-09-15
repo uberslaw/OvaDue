@@ -33,7 +33,7 @@ py -3 --version
 
 ### 2. Get the app onto the machine
 
-Pick **one** path. The folder must include at least: `app.py`, `requirements.txt`, `launch control.cmd`, `scripts\`, `deploy\` (see `Test-OvaDueDeployLayout` in `scripts\OvaDue-Deploy.ps1`).
+Pick **one** path. The folder must include at least: `app.py`, `ovadue\`, `pages\`, `requirements.txt`, `launch control.cmd`, `scripts\`, `deploy\` (see `Test-OvaDueDeployLayout` in `scripts\OvaDue-Deploy.ps1`).
 
 #### Option A — Git clone (recommended)
 
@@ -56,7 +56,7 @@ Upgrade packages are named `OvaDue_yyyyMMdd_HHmmss.zip` (prefix from `packageNam
 
 1. Copy the newest `OvaDue_*.zip` to the machine (often `C:\temp`, matching `upgradeSource`).
 2. Extract to a permanent folder (e.g. `C:\OvaDue`).
-3. Confirm `app.py`, `scripts\`, and `deploy\` are present.
+3. Confirm `app.py`, `ovadue\`, `pages\`, `scripts\`, and `deploy\` are present.
 
 For an **existing** install that already has a venv, operators normally use Launch Control **Upgrade from Push** (`Invoke-OvaDueUpgradeFromPush`). For a brand-new machine, extract + install deps as below is enough.
 
@@ -325,7 +325,9 @@ Verify logs: `data\install-verify.out.log`, `data\install-verify.err.log`, `data
 | `data\streamlit-error.log` | Streamlit stderr |
 | `data\streamlit.pid` | Supervised process id |
 | `data\deploy.log` | Package / upgrade / install / migration |
+| `data\ovadue-app.log` | App events (imports, prune, mark-delivered) |
 | `data\self-heal-report.txt` | Last Check & Repair / health check report |
+| `data\backups\` | Local `OvaDue_Backup_*.zip` (Backup now / daily task) |
 | `data\git-last.out.log` / `git-last.err.log` | Last git install commands |
 | `data\launchcontrol-startup.log` | Launch Control start |
 | `data\launchcontrol-crash.log` | Launch Control failures |
@@ -348,8 +350,11 @@ Initialize-OvaDueDeploy -Root (Get-Location).Path
 | `Invoke-OvaDueInstallFromGit` | Clone/pull to `gitInstallPath`, then Install Server (`-LaunchControl` optional) |
 | `Invoke-OvaDuePackageAndPush` | Build `OvaDue_*.zip` → `pushTarget` |
 | `Invoke-OvaDueUpgradeFromPush` | Apply newest `OvaDue_*.zip` from `upgradeSource` |
+| `Invoke-OvaDueLocalBackup` | Zip DB + delivered flags + config into `data\backups` |
+| `Invoke-OvaDueTestRestore` | Integrity-check a backup zip without touching live data |
+| `Register-OvaDueDailyBackup` | Optional 02:00 Task Scheduler job (`OvaDue-DailyBackup`) |
 | `Invoke-OvaDueExportMigrationPack` | Build `OvaDue_Migration_*.zip` |
 | `Invoke-OvaDueImportMigrationPack` | Restore migration paths only |
-| `Get-OvaDueSetupHelp` | Printed setup help (`-Topic overview\|installServer\|installFromGit\|missingFiles\|migration\|healthCheck`) |
+| `Get-OvaDueSetupHelp` | Printed setup help (`-Topic overview\|installServer\|installFromGit\|missingFiles\|migration\|healthCheck\|backup`) |
 
 Config keys: `deploy\deploy-config.json`. Package/migration path lists: `deploy\package-include.json`.

@@ -1,7 +1,7 @@
-pandas
-xlrd
-streamlit
-plotly
-streamlit-js-eval
-streamlit-autorefresh
-openpyxl
+pandas==2.2.3
+xlrd==2.0.2
+streamlit==1.50.0
+plotly==6.1.2
+streamlit-js-eval==0.1.7
+streamlit-autorefresh==1.0.1
+openpyxl==3.1.5

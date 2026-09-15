@@ -36,6 +36,17 @@ Register [scripts/OvaDue-LaunchControl.cmd](scripts/OvaDue-LaunchControl.cmd) in
 
 The Generic card reads [launch control/launch-control.json](launch%20control/launch-control.json). A hard link at [scripts/launch-control.json](scripts/launch-control.json) exposes the same file beside the `.cmd` for MLC scanners. Start, Stop, Restart, status, and Diagnostics manage the supervised Streamlit process without requiring a Windows service.
 
+## Operations (PoC hygiene)
+
+This is still an unofficial LAN PoC: HTTP on `:8501`, no SSO. Operator docs:
+
+- [Product Info/ARCHITECTURE.md](Product%20Info/ARCHITECTURE.md) — process model and trust boundary
+- [Product Info/RUNBOOK.md](Product%20Info/RUNBOOK.md) — down, port, restore, rollback
+- [Product Info/DATA.md](Product%20Info/DATA.md) — classification, retention, residency
+- [Product Info/RISK-AND-CONTROLS.md](Product%20Info/RISK-AND-CONTROLS.md) — accepted PoC risks and controls
+
+Launch Control **Backup now** writes `data\backups\OvaDue_Backup_*.zip`. **Test restore** checks SQLite without touching live data.
+
 ## Machine migration
 
 In Launch Control under **Migration**:

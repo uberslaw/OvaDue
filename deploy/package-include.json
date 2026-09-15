@@ -6,7 +6,10 @@
     "launch control",
     "scripts",
     "deploy",
-    ".streamlit"
+    ".streamlit",
+    "ovadue",
+    "pages",
+    "Product Info"
   ],
   "excludePatterns": [
     "**\\__pycache__\\**",
@@ -23,7 +26,9 @@
     "data\\smoke-err.log",
     "data\\diagnostics.requested",
     "data\\launchcontrol-crash.log",
-    "data\\deploy.log"
+    "data\\deploy.log",
+    "data\\ovadue-app.log",
+    "data\\backups"
   ],
   "preserveOnUpgrade": [
     "uploads\\**",
@@ -38,12 +43,15 @@
     "data\\diagnostics.requested",
     "data\\launchcontrol-crash.log",
     "data\\deploy.log",
-    "data\\deployed-version.json"
+    "data\\deployed-version.json",
+    "data\\ovadue-app.log",
+    "data\\backups\\**"
   ],
   "ensureDirectories": [
     "data",
     "uploads",
-    "imported data"
+    "imported data",
+    "data\\backups"
   ],
   "migrationPaths": [
     "uploads",
@@ -76,6 +84,8 @@
     "data\\git-last.err.log",
     "data\\install-verify.out.log",
     "data\\install-verify.err.log",
+    "data\\ovadue-app.log",
+    "data\\backups",
     ".venv"
   ]
 }

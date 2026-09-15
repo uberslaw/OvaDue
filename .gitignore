@@ -1,8 +1,12 @@
 .venv/
 __pycache__/
 *.pyc
+.vs/
+.pytest_cache/
+.mypy_cache/
 data/ovadue.db
 data/*.log
 data/*.pid
+data/backups/
 uploads/
 imported data/

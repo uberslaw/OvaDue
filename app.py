@@ -11,6 +11,8 @@ from streamlit_autorefresh import st_autorefresh
 from streamlit_js_eval import streamlit_js_eval
 
 from ovadue.analysis_ui import render_analysis
+from ovadue.applog import configure_logging, get_logger
+from ovadue.safe import csv_export_frame, html_text, series_contains
 from ovadue.store import connect, load_raw_dataframe, sync_imports
 
 st.set_page_config(page_title="OvaDue", layout="wide")
@@ -586,6 +588,7 @@ def save_delivered_orders(delivered_keys: set[str]) -> None:
         json.dumps(sorted(delivered_keys), indent=2),
         encoding="utf-8",
     )
+    get_logger().info("Wrote delivered_orders.json (%s key(s))", len(delivered_keys))
 
 
 def ensure_delivered_orders_loaded() -> set[str]:
@@ -607,12 +610,18 @@ def delivered_checkbox_key(tracking_key: str) -> str:
 def toggle_delivered(tracking_key: str) -> None:
     delivered = set(ensure_delivered_orders_loaded())
     widget_key = delivered_checkbox_key(tracking_key)
-    if st.session_state.get(widget_key):
+    marked = bool(st.session_state.get(widget_key))
+    if marked:
         delivered.add(tracking_key)
     else:
         delivered.discard(tracking_key)
     st.session_state.delivered_orders = delivered
     save_delivered_orders(delivered)
+    get_logger().info(
+        "Mark delivered %s for %s",
+        "on" if marked else "off",
+        tracking_key,
+    )
 
 
 def effective_status_for_row(row: pd.Series, delivered_keys: set[str]) -> str:
@@ -665,7 +674,7 @@ def format_planned_delivery_date(row: pd.Series) -> str:
         return date_str
 
     color = "#1a7f37" if change_days < 0 else "#cc0000"
-    return f'<span style="color: {color}; font-weight: 600;">{date_str}</span>'
+    return f'<span style="color: {color}; font-weight: 600;">{html_text(date_str)}</span>'
 
 def is_order_flagged(row: pd.Series) -> bool:
     return pd.notna(row.get("IsDelayed")) and row.get("IsDelayed")
@@ -790,7 +799,7 @@ def render_order_group_card(group: pd.DataFrame, show_snapshot_date: bool = Fals
     if is_flagged and banner_message:
         st.markdown(
             f"<div style='background-color: {banner_bg}; border-left: 4px solid {banner_border}; padding: 12px; margin-bottom: 10px; border-radius: 4px;'>"
-            f"<p style='color: {banner_text}; font-weight: bold; margin: 0;'>{banner_message}</p></div>",
+            f"<p style='color: {banner_text}; font-weight: bold; margin: 0;'>{html_text(banner_message)}</p></div>",
             unsafe_allow_html=True,
         )
 
@@ -809,12 +818,12 @@ def render_order_group_card(group: pd.DataFrame, show_snapshot_date: bool = Fals
         top_columns[1].markdown(delivery_text, unsafe_allow_html=True)
         lt_range_value = format_standard_lt_due(header_row.get("StandardLTLowerDate"), header_row.get("StandardLTUpperDate"))
         top_columns[2].markdown(
-            f'<p title="HP&#39;s Standard Lead Time at time of order"><strong>LT Range</strong><br>{lt_range_value}</p>',
+            f'<p title="HP&#39;s Standard Lead Time at time of order"><strong>LT Range</strong><br>{html_text(lt_range_value)}</p>',
             unsafe_allow_html=True,
         )
         top_columns[3].markdown(f"**Status**  \n:{status_color}[{status}]")
 
-        item_names = item_rows["LaptopModel"].fillna("Unknown item").astype(str).tolist()
+        item_names = [html_text(name) for name in item_rows["LaptopModel"].fillna("Unknown item").astype(str).tolist()]
         item_qtys = item_rows["OrderedQuantity"].fillna(0).tolist()
         has_plan_change = bool(header_row.get("HasRecentPlanChange")) and pd.notna(header_row.get("PreviousPlannedDeliveryDate"))
 
@@ -835,7 +844,7 @@ def render_order_group_card(group: pd.DataFrame, show_snapshot_date: bool = Fals
         if delivery_method:
             st.markdown(
                 f"<div style='margin-top: 10px; font-size: 0.875rem; color: rgba(49, 51, 63, 0.75);'>"
-                f"<strong>Delivery method</strong>  \n{delivery_method}</div>",
+                f"<strong>Delivery method</strong>  \n{html_text(delivery_method)}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -955,7 +964,7 @@ def filter_procurement_dataframe(df: pd.DataFrame, filters: dict[str, str]) -> p
             series = pd.to_datetime(filtered[column], errors="coerce").dt.strftime("%d %b %Y").fillna("")
         else:
             series = filtered[column].fillna("").astype(str)
-        filtered = filtered[series.str.contains(needle, case=False, na=False)]
+        filtered = filtered[series_contains(series, needle)]
 
     return filtered
 
@@ -977,7 +986,7 @@ def render_procurement_page(current_snapshot: pd.DataFrame, delivered_keys: set[
 
     if search_term.strip():
         mask = procurement_df.astype(str).apply(
-            lambda column: column.str.contains(search_term.strip(), case=False, na=False)
+            lambda column: series_contains(column, search_term.strip())
         ).any(axis=1)
         procurement_df = procurement_df[mask]
         if procurement_df.empty:
@@ -1084,10 +1093,10 @@ def render_my_orders_page(history: pd.DataFrame, current_snapshot: pd.DataFrame,
         text_columns = [column for column in MY_ORDERS_SEARCH_COLUMNS if column in display.columns] + ["DisplayStatus"]
         mask = pd.Series(False, index=display.index)
         for column in text_columns:
-            mask |= display[column].astype(str).str.contains(search_term, case=False, na=False)
+            mask |= series_contains(display[column], search_term)
         for column in MY_ORDERS_SEARCH_DATE_COLUMNS:
             if column in display.columns:
-                mask |= display[column].dt.strftime("%Y-%m-%d %d %b %Y").str.contains(search_term, case=False, na=False)
+                mask |= series_contains(display[column].dt.strftime("%Y-%m-%d %d %b %Y"), search_term)
         display = display[mask]
         if display.empty:
             st.warning(f'No orders found matching "{search_term.strip()}".')
@@ -1111,7 +1120,7 @@ def render_my_orders_page(history: pd.DataFrame, current_snapshot: pd.DataFrame,
 
         order_summary = f"{len(office_orders):,} order line(s) across {office_orders['OrderGroupKey'].nunique():,} order(s)"
         st.markdown(
-            f"### {office}<span style='font-size: 0.875rem; font-weight: normal; color: rgba(49, 51, 63, 0.6); margin-left: 0.75rem;'>{order_summary}</span>",
+            f"### {html_text(office)}<span style='font-size: 0.875rem; font-weight: normal; color: rgba(49, 51, 63, 0.6); margin-left: 0.75rem;'>{html_text(order_summary)}</span>",
             unsafe_allow_html=True,
         )
         st.caption(address)
@@ -1285,7 +1294,7 @@ def render_page_header() -> None:
         </style>
         <div class="ovadue-top-bar">
             <h1>OvaDue</h1>
-            <p>Outstanding orders and delivery-time analysis. API v{api_version}</p>
+            <p>Outstanding orders and delivery-time analysis. API v{html_text(api_version)}</p>
         </div>
         <div class="ovadue-top-bar-spacer"></div>
         """,
@@ -1294,6 +1303,7 @@ def render_page_header() -> None:
 
 
 def main() -> None:
+    configure_logging(DATA_DIR)
     render_page_header()
 
     if "app_page" not in st.session_state:
@@ -1451,12 +1461,13 @@ def main() -> None:
     else:
         render_my_orders_page(df, current_snapshot, latest_order_line_keys)
 
-    csv = df.drop(columns=["EffectiveStatus"], errors="ignore").to_csv(index=False).encode("utf-8")
+    csv = csv_export_frame(df).to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download filtered data as CSV",
         data=csv,
         file_name="ovadue_orders_filtered.csv",
         mime="text/csv",
+        help="Exports operational columns only. Address, customer name, and price fields are omitted.",
     )
 
 
