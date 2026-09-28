@@ -8,6 +8,7 @@ from ovadue.store import (
     MAX_EXCEL_BYTES,
     connect,
     db_signature,
+    load_raw_dataframe,
     probe_sqlite,
     prune_imported_data,
     read_excel_file,
@@ -61,6 +62,32 @@ def test_sync_imports_and_probe(tmp_path: Path) -> None:
     assert file_count == 1
     assert total_rows == 1
     assert imported
+
+
+def test_late_import_fills_gap_and_keeps_newer_snapshots(tmp_path: Path) -> None:
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    older = uploads / "osreport_ArupBacklog_2026-08-01_0800.xlsx"
+    newer = uploads / "osreport_ArupBacklog_2026-09-01_0800.xlsx"
+    _write_xlsx(older, [{"HPOrderNo": "OLD", "PurchaseOrderNo": "P-OLD"}])
+    _write_xlsx(newer, [{"HPOrderNo": "NEW", "PurchaseOrderNo": "P-NEW"}])
+    signature, warnings = sync_imports(tmp_path)
+    assert warnings == []
+    assert signature[1] == 2
+
+    gap = uploads / "osreport_ArupBacklog_2026-08-15_0800.xlsx"
+    _write_xlsx(gap, [{"HPOrderNo": "GAP", "PurchaseOrderNo": "P-GAP"}])
+    signature, warnings = sync_imports(tmp_path)
+    assert warnings == []
+    assert signature[1] == 3
+    assert signature[2] == 3
+
+    conn = connect(tmp_path)
+    names = {row["filename"] for row in conn.execute("SELECT filename FROM imported_files")}
+    frame = load_raw_dataframe(conn)
+    conn.close()
+    assert names == {older.name, newer.name, gap.name}
+    assert set(frame["HPOrderNo"].astype(str)) == {"OLD", "NEW", "GAP"}
 
 
 def test_read_excel_rejects_oversize(tmp_path: Path, monkeypatch) -> None:

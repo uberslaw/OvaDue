@@ -13,3 +13,9 @@ def test_package_include_ships_app_modules() -> None:
 def test_backup_script_exists() -> None:
     assert Path("scripts/OvaDue-Backup.ps1").is_file()
     assert Path("scripts/probe_sqlite.py").is_file()
+
+
+def test_streamlit_theme_is_locked_light() -> None:
+    text = Path(".streamlit/config.toml").read_text(encoding="utf-8")
+    assert 'base = "light"' in text
+    assert "backgroundColor = \"#ffffff\"" in text

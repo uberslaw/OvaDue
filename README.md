@@ -12,6 +12,8 @@ cd "c:\Users\christopher.owen\OneDrive - Arup\Arup\AI\OvaDue"
 "C:/Program Files/Python314/python.exe" -m streamlit run app.py
 ```
 
+The dashboard is locked to Streamlit's **light** theme in [`.streamlit/config.toml`](.streamlit/config.toml). It does not follow the visitor's OS/browser dark mode. Restart Streamlit after changing that file. If someone already picked Dark in the hamburger menu, they need to switch back to the custom/light theme once.
+
 ## Views
 
 - **Outstanding Orders**: laptop quantities awaiting delivery, their current status, planned ship/delivery dates, and late-order detail.
