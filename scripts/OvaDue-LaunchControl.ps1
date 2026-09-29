@@ -301,6 +301,59 @@ function Invoke-BackupMigrationPackUi {
     }
 }
 
+function Invoke-LocalBackupUi {
+    Invoke-DeployAction 'Backup now' {
+        $result = Invoke-OvaDueLocalBackup
+        Add-EventLine ("Local backup written: {0}" -f $result.ZipPath)
+    }
+}
+
+function Invoke-OpenBackupsFolderUi {
+    $dir = Join-Path $script:DataDir 'backups'
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    Start-Process explorer.exe -ArgumentList $dir
+    Add-EventLine "Opened backups folder: $dir"
+}
+
+function Invoke-TestRestoreUi {
+    Invoke-DeployAction 'Test restore' {
+        $result = Invoke-OvaDueTestRestore
+        Add-EventLine ("Test restore OK: {0} (snapshot_rows={1})" -f $result.ZipPath, $result.SnapshotRowCount)
+        [System.Windows.Forms.MessageBox]::Show(
+            ("SQLite integrity_check=ok`r`nRows: {0}`r`n`r`n{1}`r`n`r`nLive data was not changed." -f $result.SnapshotRowCount, $result.ZipPath),
+            'Test restore',
+            'OK',
+            'Information'
+        ) | Out-Null
+    }
+}
+
+function Invoke-RegisterDailyBackupUi {
+    $already = $false
+    try { $already = Test-OvaDueDailyBackupRegistered } catch { $already = $false }
+    $prompt = if ($already) {
+        'A daily backup task already exists. Replace it (02:00 local, current Windows user)?'
+    } else {
+        'Register a daily Windows Task Scheduler job at 02:00 (current user, last 14 zips in data\backups)? No Arup IT approval required.'
+    }
+    $confirm = [System.Windows.Forms.MessageBox]::Show(
+        $prompt,
+        'Register daily backup',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+        Add-EventLine 'Register daily backup cancelled.'
+        return
+    }
+    Invoke-DeployAction 'Register daily backup' {
+        $name = Register-OvaDueDailyBackup
+        Add-EventLine "Registered scheduled task $name"
+    }
+}
+
 function Invoke-ImportMigrationPackUi {
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
     $dialog.Title = 'Select OvaDue migration pack to import'
@@ -552,6 +605,12 @@ Add-RailButton 'Install from Git' { Invoke-DeployAction 'Install from Git' { Inv
 Add-RailButton 'Install Server' { Invoke-DeployAction 'Install Server' { Invoke-OvaDueInstallServer } } | Out-Null
 Add-RailButton 'Package and Push Update' { Invoke-DeployAction 'Package and Push Update' { Invoke-OvaDuePackageAndPush } } | Out-Null
 Add-RailButton 'Upgrade from Push' { Invoke-DeployAction 'Upgrade from Push' { Invoke-OvaDueUpgradeFromPush -PidFile $script:PidFile } } | Out-Null
+Add-RailLabel 'Backups' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
+Add-RailButton 'Backup now' { Invoke-LocalBackupUi } | Out-Null
+Add-RailButton 'Open backups folder' { Invoke-OpenBackupsFolderUi } | Out-Null
+Add-RailButton 'Test restore' { Invoke-TestRestoreUi } | Out-Null
+Add-RailButton 'Register daily backup' { Invoke-RegisterDailyBackupUi } | Out-Null
+Add-RailButton 'Backup Help' { Show-OvaDueSetupHelp -Topic 'backup' } | Out-Null
 Add-RailLabel 'Migration' (New-Object System.Drawing.Font('Segoe UI Semibold', 10)) | Out-Null
 Add-RailButton 'Backup Migration Pack' { Invoke-BackupMigrationPackUi } | Out-Null
 Add-RailButton 'Import Migration Pack' { Invoke-ImportMigrationPackUi } | Out-Null

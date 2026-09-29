@@ -5,3 +5,12 @@ headless = true
 
 [runner]
 fastReruns = true
+
+# Explicit colours make this a Custom Theme. Without [theme], Streamlit
+# follows the visitor's OS/browser dark-mode preference.
+[theme]
+base = "light"
+primaryColor = "#ff4b4b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#31333f"

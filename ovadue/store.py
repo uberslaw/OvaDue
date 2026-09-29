@@ -12,9 +12,15 @@ from pathlib import Path
 
 import pandas as pd
 
+from ovadue.applog import get_logger
+
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
+SNAPSHOT_STAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2})_(\d{3,5})")
 RETENTION_DAYS = 365
 IMPORTED_DATA_DIRNAME = "imported data"
+MAX_EXCEL_BYTES = 50 * 1024 * 1024
+SQLITE_TIMEOUT_SECONDS = 30
+SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
 def extract_snapshot_date(filename: str) -> pd.Timestamp | pd.NaT:
@@ -22,6 +28,19 @@ def extract_snapshot_date(filename: str) -> pd.Timestamp | pd.NaT:
     if not match:
         return pd.NaT
     return pd.to_datetime(match.group(1), errors="coerce")
+
+
+def snapshot_stamp_from_filename(filename: str) -> datetime | None:
+    """Report date+time from ``osreport_ArupBacklog_YYYY-MM-DD_HHMM…``."""
+    match = SNAPSHOT_STAMP_RE.search(filename)
+    if not match:
+        return None
+    day = match.group(1)
+    hhmm = match.group(2)[:4]
+    try:
+        return datetime.strptime(f"{day} {hhmm}", "%Y-%m-%d %H%M")
+    except ValueError:
+        return None
 
 
 def imported_data_dir(root: Path) -> Path:
@@ -44,9 +63,11 @@ def ensure_directories(root: Path) -> tuple[Path, Path, Path]:
 
 def connect(root: Path) -> sqlite3.Connection:
     ensure_directories(root)
-    conn = sqlite3.connect(db_path_for(root))
+    conn = sqlite3.connect(db_path_for(root), timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
     ensure_schema(conn)
     return conn
 
@@ -101,7 +122,15 @@ def discover_pending_files(root: Path) -> list[Path]:
 
 
 def read_excel_file(path: Path) -> pd.DataFrame:
-    engine = "xlrd" if path.suffix.lower() == ".xls" else None
+    size = path.stat().st_size
+    if size > MAX_EXCEL_BYTES:
+        raise ValueError(
+            f"{path.name} is {size} bytes; max import size is {MAX_EXCEL_BYTES} bytes"
+        )
+    suffix = path.suffix.lower()
+    if suffix not in {".xls", ".xlsx"}:
+        raise ValueError(f"Unsupported spreadsheet type: {path.name}")
+    engine = "xlrd" if suffix == ".xls" else None
     return pd.read_excel(path, sheet_name=0, engine=engine)
 
 
@@ -249,6 +278,35 @@ def prune_imported_data(
     return removed
 
 
+def probe_sqlite(path: Path) -> tuple[str, int]:
+    """Return (integrity_check, snapshot_rows count). Used by Test restore."""
+    conn = sqlite3.connect(str(path))
+    try:
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+        try:
+            rows = int(conn.execute("SELECT COUNT(*) FROM snapshot_rows").fetchone()[0])
+        except sqlite3.Error:
+            rows = 0
+        return integrity, rows
+    finally:
+        conn.close()
+
+
+def latest_snapshot_file(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """Newest report by snapshot date in the filename, not last import time."""
+    return conn.execute(
+        """
+        SELECT filename, snapshot_date, imported_at
+        FROM imported_files
+        ORDER BY
+            CASE WHEN snapshot_date IS NULL OR snapshot_date = '' THEN 0 ELSE 1 END DESC,
+            snapshot_date DESC,
+            filename DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+
 def db_signature(conn: sqlite3.Connection) -> tuple[str, int, int]:
     row = conn.execute(
         """
@@ -290,14 +348,20 @@ def sync_imports(root: Path) -> tuple[tuple[str, int, int], list[str]]:
     _, imported_dir, _ = ensure_directories(root)
     warnings: list[str] = []
     conn = connect(root)
+    log = get_logger()
 
     for path in discover_pending_files(root):
         try:
-            _import_one_file(conn, path, imported_dir)
+            imported = _import_one_file(conn, path, imported_dir)
+            if imported:
+                log.info("Imported snapshot %s", path.name)
         except Exception as exc:
             warnings.append(f"Skipping {path.name}: {exc}")
+            log.warning("Skipped import %s: %s", path.name, exc)
 
-    prune_imported_data(conn, imported_dir)
+    removed = prune_imported_data(conn, imported_dir)
+    if removed:
+        log.info("Pruned %s expired import record(s)", removed)
     signature = db_signature(conn)
     conn.close()
     return signature, warnings

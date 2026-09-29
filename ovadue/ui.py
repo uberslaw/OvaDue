@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -336,7 +337,8 @@ def scatter_pair(
 
     pane_h = _expanded_height() if focus != "both" else 450
     iframe_h = _expanded_height() if focus != "both" else 940
-    html = _SCATTER_HTML.replace("__FIG_A__", _fig_json(fig_a, key_a, pane_h))
+    html = _scatter_html()
+    html = html.replace("__FIG_A__", _fig_json(fig_a, key_a, pane_h))
     html = html.replace("__FIG_B__", _fig_json(fig_b, key_b, pane_h))
     html = html.replace("__FOCUS__", focus)
     html = html.replace("__CONFIG__", json.dumps(PLOTLY_CONFIG))
@@ -371,12 +373,37 @@ def _fig_json(fig: go.Figure, rev: str, height: int) -> str:
     return json.dumps(json.loads(styled.to_json())).replace("<", "\\u003c")
 
 
+def _plotly_js_source() -> str:
+    """Prefer the Plotly JS bundled with the installed Python package (no CDN)."""
+    try:
+        import plotly
+
+        candidate = Path(plotly.__file__).resolve().parent / "package_data" / "plotly.min.js"
+        if candidate.exists():
+            return candidate.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    bundled = Path(__file__).resolve().parent / "static" / "plotly.min.js"
+    if bundled.exists():
+        return bundled.read_text(encoding="utf-8")
+    return ""
+
+
+def _scatter_html() -> str:
+    js = _plotly_js_source()
+    if js:
+        script = f"<script>{js}</script>"
+    else:
+        script = '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>'
+    return _SCATTER_HTML.replace("__PLOTLY_SCRIPT__", script)
+
+
 _SCATTER_HTML = r"""
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  __PLOTLY_SCRIPT__
   <style>
     html, body {
       margin: 0;
@@ -408,7 +435,7 @@ _SCATTER_HTML = r"""
   </div>
   <script>
     if (typeof Plotly === "undefined") {
-      document.body.innerHTML = "<p style='padding:1rem;font-family:sans-serif'>Plotly failed to load. Check network access to cdn.plot.ly.</p>";
+      document.body.innerHTML = "<p style='padding:1rem;font-family:sans-serif'>Plotly failed to load. Re-run Install Server so the local plotly package is present.</p>";
     } else {
     const figA = __FIG_A__;
     const figB = __FIG_B__;

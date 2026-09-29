@@ -28,7 +28,9 @@ function Test-OvaDueDeployLayout {
         'scripts\OvaDue-Deploy.ps1',
         'deploy\deploy-config.json',
         'deploy\package-include.json',
-        'deploy\version.json'
+        'deploy\version.json',
+        'ovadue',
+        'pages'
     )
 
     $missing = New-Object System.Collections.Generic.List[string]
@@ -93,7 +95,7 @@ function Get-OvaDueSetupHelp {
             '   Source: Backup Migration Pack. Target: Install Server/Git, then Import Migration Pack.'
             ''
             'Required files in every copy/git clone:'
-            'app.py, requirements.txt, launch control.cmd, scripts\, deploy\'
+            'app.py, ovadue\, pages\, requirements.txt, launch control.cmd, scripts\, deploy\'
             ''
             $manualInstall
         ) -join "`r`n"
@@ -172,6 +174,21 @@ function Get-OvaDueSetupHelp {
             ''
             "Report: $Root\data\self-heal-report.txt"
             "Deploy log: $Root\data\deploy.log"
+        ) -join "`r`n"
+        backup = @(
+            'Local backups (data\backups\OvaDue_Backup_*.zip):'
+            ''
+            'Backup now - copies ovadue.db, delivered_orders.json, and local config.'
+            'This is a true file backup, not RAID/replication.'
+            ''
+            'Test restore - extracts the newest zip to a temp folder and runs'
+            'SQLite integrity_check. Live data is not overwritten.'
+            ''
+            'Register daily backup - optional Windows Task Scheduler job at 02:00'
+            '(current Windows user; no Arup IT ticket). Keeps the last 14 zips.'
+            ''
+            'Full machine move still uses Backup Migration Pack / Import Migration Pack.'
+            "Folder: $Root\data\backups"
         ) -join "`r`n"
     }
 
@@ -1256,6 +1273,222 @@ function Invoke-OvaDueImportMigrationPackCore {
     }
 }
 
+function Get-OvaDueBackupDirectory {
+    $dir = Join-Path $script:DeployRoot 'data\backups'
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    return $dir
+}
+
+function Get-OvaDueBackupZips {
+    $dir = Join-Path $script:DeployRoot 'data\backups'
+    if (-not (Test-Path -LiteralPath $dir)) {
+        return @()
+    }
+    return @(Get-ChildItem -LiteralPath $dir -File -Filter 'OvaDue_Backup_*.zip' | Sort-Object LastWriteTime -Descending)
+}
+
+function Get-OvaDueLatestBackup {
+    $zips = @(Get-OvaDueBackupZips)
+    if ($zips.Count -eq 0) {
+        return $null
+    }
+    return $zips[0]
+}
+
+function Invoke-OvaDuePruneBackups {
+    param([int]$Keep = 14)
+
+    $zips = @(Get-OvaDueBackupZips)
+    if ($zips.Count -le $Keep) {
+        return 0
+    }
+    $removed = 0
+    $zips | Select-Object -Skip $Keep | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+        $removed++
+    }
+    if ($removed -gt 0) {
+        Write-DeployLog "Pruned $removed old local backup(s); kept $Keep."
+    }
+    return $removed
+}
+
+function Invoke-OvaDueLocalBackup {
+    <#
+    .SYNOPSIS
+      Zip live SQLite + delivered flags + local config into data\backups.
+    #>
+    if (-not $script:DeployRoot) {
+        throw 'Initialize-OvaDueDeploy must be called before Invoke-OvaDueLocalBackup.'
+    }
+
+    $backupDir = Get-OvaDueBackupDirectory
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $zipName = "OvaDue_Backup_$stamp.zip"
+    $zipPath = Join-Path $backupDir $zipName
+    $stageRoot = Join-Path $env:TEMP ("ovadue-backup-$stamp")
+    New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
+
+    $relativePaths = @(
+        'data\ovadue.db',
+        'data\delivered_orders.json',
+        'data\deployed-version.json',
+        'deploy\deploy-config.json',
+        '.streamlit\config.toml',
+        'launch control\launch-control.json'
+    )
+
+    $copied = 0
+    try {
+        foreach ($rel in $relativePaths) {
+            $source = Join-Path $script:DeployRoot $rel
+            if (-not (Test-Path -LiteralPath $source)) {
+                continue
+            }
+            $dest = Join-Path $stageRoot $rel
+            $destDir = Split-Path -Parent $dest
+            if (-not (Test-Path -LiteralPath $destDir)) {
+                New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $source -Destination $dest -Force
+            $copied++
+        }
+        if ($copied -eq 0) {
+            throw 'Nothing to back up (no database, delivered-orders file, or config found).'
+        }
+        if (Test-Path -LiteralPath $zipPath) {
+            Remove-Item -LiteralPath $zipPath -Force
+        }
+        Compress-Archive -Path (Join-Path $stageRoot '*') -DestinationPath $zipPath -Force
+        Invoke-OvaDuePruneBackups -Keep 14
+        Write-DeployLog "Local backup written: $zipPath ($copied file(s))"
+    } finally {
+        Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    return [pscustomobject]@{
+        ZipPath = $zipPath
+        FileCount = $copied
+        BackupDirectory = $backupDir
+    }
+}
+
+function Invoke-OvaDueTestRestore {
+    <#
+    .SYNOPSIS
+      Extract a backup zip to a temp folder and verify SQLite integrity. Does not touch live data.
+    #>
+    param(
+        [string]$ZipPath
+    )
+
+    if (-not $script:DeployRoot) {
+        throw 'Initialize-OvaDueDeploy must be called before Invoke-OvaDueTestRestore.'
+    }
+
+    if (-not $ZipPath) {
+        $latest = Get-OvaDueLatestBackup
+        if (-not $latest) {
+            throw 'No OvaDue_Backup_*.zip found in data\backups. Click Backup now first.'
+        }
+        $ZipPath = $latest.FullName
+    }
+    if (-not (Test-Path -LiteralPath $ZipPath)) {
+        throw "Backup zip not found: $ZipPath"
+    }
+
+    $stamp = Get-Date -Format 'yyyyMMddHHmmss'
+    $extractRoot = Join-Path $env:TEMP ("ovadue-restore-test-$stamp")
+    New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+    $integrity = $null
+    $rowCount = $null
+    $dbPath = $null
+
+    try {
+        Expand-Archive -LiteralPath $ZipPath -DestinationPath $extractRoot -Force
+        $dbPath = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter 'ovadue.db' -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+        if (-not $dbPath) {
+            throw "Backup $ZipPath does not contain ovadue.db"
+        }
+
+        $python = Join-Path $script:DeployRoot '.venv\Scripts\python.exe'
+        if (-not (Test-Path -LiteralPath $python)) {
+            $python = 'python'
+        }
+        $probeScript = Join-Path $script:DeployRoot 'scripts\probe_sqlite.py'
+        $output = & $python $probeScript $dbPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "SQLite probe failed: $output"
+        }
+        $lines = @($output | ForEach-Object { "$_" } | Where-Object { $_.Trim() })
+        $integrity = if ($lines.Count -ge 1) { $lines[0].Trim() } else { '' }
+        if ($lines.Count -ge 2) {
+            $rowCount = [int]$lines[1].Trim()
+        }
+        if ($integrity -ne 'ok') {
+            throw "SQLite integrity_check returned '$integrity'"
+        }
+        Write-DeployLog "Test restore OK: $ZipPath (rows=$rowCount)"
+    } finally {
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    return [pscustomobject]@{
+        ZipPath = $ZipPath
+        Integrity = $integrity
+        SnapshotRowCount = $rowCount
+        DatabasePathInZip = $dbPath
+    }
+}
+
+function Get-OvaDueDailyBackupTaskName {
+    return 'OvaDue-DailyBackup'
+}
+
+function Test-OvaDueDailyBackupRegistered {
+    $name = Get-OvaDueDailyBackupTaskName
+    try {
+        Get-ScheduledTask -TaskName $name -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Register-OvaDueDailyBackup {
+    if (-not $script:DeployRoot) {
+        throw 'Initialize-OvaDueDeploy must be called before Register-OvaDueDailyBackup.'
+    }
+    $scriptPath = Join-Path $script:DeployRoot 'scripts\OvaDue-Backup.ps1'
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        throw "Missing $scriptPath"
+    }
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
+        "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+    )
+    $trigger = New-ScheduledTaskTrigger -Daily -At 2:00am
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $name = Get-OvaDueDailyBackupTaskName
+    if (Test-OvaDueDailyBackupRegistered) {
+        Unregister-ScheduledTask -TaskName $name -Confirm:$false
+    }
+    Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -TaskPath '\' | Out-Null
+    Write-DeployLog "Registered daily backup task $name (02:00 local)."
+    return $name
+}
+
+function Unregister-OvaDueDailyBackup {
+    $name = Get-OvaDueDailyBackupTaskName
+    if (Test-OvaDueDailyBackupRegistered) {
+        Unregister-ScheduledTask -TaskName $name -Confirm:$false
+        Write-DeployLog "Unregistered daily backup task $name."
+    }
+    return $name
+}
+
 function New-OvaDueHealthIssue {
     param(
         [string]$Id,
@@ -1615,6 +1848,34 @@ function Invoke-OvaDueHealthCheck {
         }
     } else {
         Add-Issue (New-OvaDueHealthIssue -Id 'streamlit-pid' -Severity 'OK' -Message 'No data\streamlit.pid (dashboard not supervised).')
+    }
+
+    # --- local backups ---
+    $dbFile = Join-Path $root 'data\ovadue.db'
+    $latestBackup = Get-OvaDueLatestBackup
+    if (-not (Test-Path -LiteralPath $dbFile)) {
+        Add-Issue (New-OvaDueHealthIssue -Id 'sqlite-db' -Severity 'WARN' `
+            -Message 'data\ovadue.db is missing (no reports imported yet).' `
+            -Guidance 'Put .xls/.xlsx files in uploads\ and click Refresh data now, or Import Migration Pack.')
+    } else {
+        Add-Issue (New-OvaDueHealthIssue -Id 'sqlite-db' -Severity 'OK' -Message 'Present: data\ovadue.db')
+    }
+    if (-not $latestBackup) {
+        Add-Issue (New-OvaDueHealthIssue -Id 'local-backup' -Severity 'WARN' `
+            -Message 'No local backup in data\backups.' `
+            -Guidance 'In Launch Control click Backup now, then Test restore. Optionally Register daily backup.' `
+            -Action UserAction)
+    } else {
+        $ageHours = [int]((Get-Date) - $latestBackup.LastWriteTime).TotalHours
+        if ($ageHours -gt 48) {
+            Add-Issue (New-OvaDueHealthIssue -Id 'local-backup' -Severity 'WARN' `
+                -Message ("Latest backup is {0} hours old: {1}" -f $ageHours, $latestBackup.Name) `
+                -Guidance 'Click Backup now. Register daily backup if this host should keep a nightly zip.' `
+                -Action UserAction)
+        } else {
+            Add-Issue (New-OvaDueHealthIssue -Id 'local-backup' -Severity 'OK' `
+                -Message ("Latest backup {0} ({1} hours old)." -f $latestBackup.Name, $ageHours))
+        }
     }
 
     $needsInstallServer = [bool]$script:needsInstallServerFlag
