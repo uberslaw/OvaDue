@@ -15,6 +15,7 @@ import pandas as pd
 from ovadue.applog import get_logger
 
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
+SNAPSHOT_STAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2})_(\d{3,5})")
 RETENTION_DAYS = 365
 IMPORTED_DATA_DIRNAME = "imported data"
 MAX_EXCEL_BYTES = 50 * 1024 * 1024
@@ -27,6 +28,19 @@ def extract_snapshot_date(filename: str) -> pd.Timestamp | pd.NaT:
     if not match:
         return pd.NaT
     return pd.to_datetime(match.group(1), errors="coerce")
+
+
+def snapshot_stamp_from_filename(filename: str) -> datetime | None:
+    """Report date+time from ``osreport_ArupBacklog_YYYY-MM-DD_HHMM…``."""
+    match = SNAPSHOT_STAMP_RE.search(filename)
+    if not match:
+        return None
+    day = match.group(1)
+    hhmm = match.group(2)[:4]
+    try:
+        return datetime.strptime(f"{day} {hhmm}", "%Y-%m-%d %H%M")
+    except ValueError:
+        return None
 
 
 def imported_data_dir(root: Path) -> Path:
@@ -276,6 +290,21 @@ def probe_sqlite(path: Path) -> tuple[str, int]:
         return integrity, rows
     finally:
         conn.close()
+
+
+def latest_snapshot_file(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """Newest report by snapshot date in the filename, not last import time."""
+    return conn.execute(
+        """
+        SELECT filename, snapshot_date, imported_at
+        FROM imported_files
+        ORDER BY
+            CASE WHEN snapshot_date IS NULL OR snapshot_date = '' THEN 0 ELSE 1 END DESC,
+            snapshot_date DESC,
+            filename DESC
+        LIMIT 1
+        """
+    ).fetchone()
 
 
 def db_signature(conn: sqlite3.Connection) -> tuple[str, int, int]:

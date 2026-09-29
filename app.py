@@ -13,7 +13,13 @@ from streamlit_js_eval import streamlit_js_eval
 from ovadue.analysis_ui import render_analysis
 from ovadue.applog import configure_logging, get_logger
 from ovadue.safe import csv_export_frame, html_text, series_contains
-from ovadue.store import connect, load_raw_dataframe, sync_imports
+from ovadue.store import (
+    connect,
+    latest_snapshot_file,
+    load_raw_dataframe,
+    snapshot_stamp_from_filename,
+    sync_imports,
+)
 
 st.set_page_config(page_title="OvaDue", layout="wide")
 
@@ -26,8 +32,6 @@ OFFICE_MANUALLY_SET_KEY = "ovadue_offices_manual"
 REGION_SELECTION_STORAGE_KEY = "ovadue_region_selection"
 FILTER_PREFS_INITIALIZED_KEY = "ovadue_filters_initialized"
 DELIVERED_ORDERS_PATH = DATA_DIR / "data" / "delivered_orders.json"
-VERSION_PATH = DATA_DIR / "deploy" / "version.json"
-DEPLOYED_VERSION_PATH = DATA_DIR / "data" / "deployed-version.json"
 PROCUREMENT_DEFAULT_COLUMNS = ["Status", "Order date", "Planned delivery", "Office", "Items", "QTY", "PO / Order"]
 COUNTRY_REGIONS = {
     "Australia": "APAC",
@@ -1238,22 +1242,26 @@ def render_delivery_page(history: pd.DataFrame, current_snapshot: pd.DataFrame) 
         st.dataframe(observed_summary, hide_index=True, width="stretch")
 
 
-def load_api_version() -> str:
-    for path in (DEPLOYED_VERSION_PATH, VERSION_PATH):
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        api_version = payload.get("apiVersion")
-        if api_version is not None:
-            return str(api_version)
-    return "dev"
+def render_latest_snapshot_sidebar() -> None:
+    """Show the newest report by snapshot date, not the file most recently dropped in."""
+    conn = connect(DATA_DIR)
+    try:
+        record = latest_snapshot_file(conn)
+    finally:
+        conn.close()
+    if record is None:
+        return
+    filename = str(record["filename"])
+    stamp = snapshot_stamp_from_filename(filename)
+    st.sidebar.markdown("**Last import**")
+    st.sidebar.write(filename)
+    if stamp is not None:
+        st.sidebar.caption(stamp.strftime("%d %b %Y %H:%M"))
+    elif record["snapshot_date"]:
+        st.sidebar.caption(str(record["snapshot_date"]))
 
 
 def render_page_header() -> None:
-    api_version = load_api_version()
     st.markdown(
         f"""
         <style>
@@ -1294,7 +1302,7 @@ def render_page_header() -> None:
         </style>
         <div class="ovadue-top-bar">
             <h1>OvaDue</h1>
-            <p>Outstanding orders and delivery-time analysis. API v{html_text(api_version)}</p>
+            <p>Outstanding orders and delivery-time analysis.</p>
         </div>
         <div class="ovadue-top-bar-spacer"></div>
         """,
@@ -1334,6 +1342,7 @@ def main() -> None:
     st.sidebar.header("Filters")
     if st.sidebar.button("Refresh data now", width="stretch"):
         st.rerun()
+    render_latest_snapshot_sidebar()
 
     regions = sorted(df_all.get("Region", pd.Series(dtype=str)).dropna().astype(str).unique())
     offices = sorted(df_all.get("Office", pd.Series(dtype=str)).dropna().astype(str).unique())

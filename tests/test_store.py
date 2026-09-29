@@ -8,10 +8,12 @@ from ovadue.store import (
     MAX_EXCEL_BYTES,
     connect,
     db_signature,
+    latest_snapshot_file,
     load_raw_dataframe,
     probe_sqlite,
     prune_imported_data,
     read_excel_file,
+    snapshot_stamp_from_filename,
     sync_imports,
 )
 
@@ -88,6 +90,26 @@ def test_late_import_fills_gap_and_keeps_newer_snapshots(tmp_path: Path) -> None
     conn.close()
     assert names == {older.name, newer.name, gap.name}
     assert set(frame["HPOrderNo"].astype(str)) == {"OLD", "NEW", "GAP"}
+    latest = latest_snapshot_file(connect(tmp_path))
+    assert latest is not None
+    assert latest["filename"] == newer.name
+
+
+def test_latest_snapshot_file_ignores_later_import_of_older_report(tmp_path: Path) -> None:
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    newest = uploads / "osreport_ArupBacklog_2026-09-28_0800.xlsx"
+    _write_xlsx(newest, [{"HPOrderNo": "NEWEST"}])
+    sync_imports(tmp_path)
+    older = uploads / "osreport_ArupBacklog_2026-09-03_1438.xlsx"
+    _write_xlsx(older, [{"HPOrderNo": "OLDER"}])
+    sync_imports(tmp_path)
+    latest = latest_snapshot_file(connect(tmp_path))
+    assert latest is not None
+    assert latest["filename"] == newest.name
+    stamp = snapshot_stamp_from_filename(latest["filename"])
+    assert stamp is not None
+    assert stamp.strftime("%Y-%m-%d %H:%M") == "2026-09-28 08:00"
 
 
 def test_read_excel_rejects_oversize(tmp_path: Path, monkeypatch) -> None:
